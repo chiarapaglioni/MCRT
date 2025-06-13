@@ -1,7 +1,9 @@
 import jdata
 import numpy as np
 import matplotlib.pyplot as plt
+import json
 import os
+from datetime import datetime
 
 def load_mcx_jnifti(path):
     """Load MCX output (.json JNIfTI format) and extract raw data."""
@@ -27,12 +29,53 @@ def plot_decay(voxel_decay, label=None):
         plt.legend()
     plt.grid(True)
 
+def save_mcx_as_npy(all_channels, output_dir='./output', metadata=None):
+    """
+    Save MCX simulation data as .npy files with metadata.
+    
+    Args:
+        all_channels (np.ndarray): Stacked array of shape [C, T, D, H, W]
+                                  (Channels, Time, Depth, Height, Width)
+        output_dir (str): Directory to save files (created if doesn't exist)
+        metadata (dict): Optional metadata to save as JSON
+    
+    Returns:
+        dict: Paths to saved files
+    """
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Save data
+    data_path = os.path.join(output_dir, f'mcx_data_{timestamp}.npy')
+    np.save(data_path, all_channels)
+    
+    # Save metadata
+    meta_path = os.path.join(output_dir, f'mcx_metadata_{timestamp}.json')
+    with open(meta_path, 'w') as f:
+        json.dump(metadata or {}, f, indent=2)
+    
+    # Save individual channels (optional)
+    channel_paths = []
+    for c in range(all_channels.shape[0]):
+        chan_path = os.path.join(output_dir, f'channel_{c}_{timestamp}.npy')
+        np.save(chan_path, all_channels[c])
+        channel_paths.append(chan_path)
+    
+    return {
+        'data': data_path,
+        'metadata': meta_path,
+        'channels': channel_paths
+    }
+
 def main():
     # === Replace these with your actual file paths ===
     channel_files = [
-        "ch1_520nm.json",
-        "ch2_580nm.json",
-        "ch3_650nm.json"
+        "data/ch1_520nm.json",
+        "data/ch2_580nm.json",
+        "data/ch3_650nm.json"
     ]
 
     all_channels = []
@@ -49,6 +92,19 @@ def main():
     # Stack across channel dimension
     data = np.stack(all_channels, axis=0)  # [C, T, D, H, W]
     print(f"\n Final data shape: {data.shape} (C, T, D, H, W)")
+
+    # Save as npy
+    # With metadata
+    metadata = {
+        'wavelengths': [520, 580, 650],  # nm
+        'voxel_size': [1.0, 1.0, 1.0],  # mm
+        'units': 'W/mm²'
+    }
+
+    # Save files
+    paths = save_mcx_as_npy(data, metadata=metadata)
+    print(f"Saved data to: {paths['data']}")
+    print(f"Metadata: {paths['metadata']}")
 
     # === Visualization ===
     # Pick voxel (center by default)
