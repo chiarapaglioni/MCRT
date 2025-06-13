@@ -1,87 +1,65 @@
 import torch
 import numpy as np
-from torchvision import transforms
-import matplotlib.pyplot as plt
+from torch.utils.data import Dataset
 
-class BinomDataset(torch.utils.data.Dataset):
-    '''
-    Dataset for time-resolved data: [N, T, D, H, W]
-    Splits each sample into binomial input and target, normalized as distributions.
-
-    Parameters:
-        data (numpy array): [N, T, D, H, W] integer photon counts
-        windowSize (int): spatial crop size (H=W)
-        depthSize (int): number of depth slices to crop (D)
-        minPSNR (float): minimum pseudo PSNR
-        maxPSNR (float): maximum pseudo PSNR
-        virtSize (int): virtual dataset size
-        augment (bool): whether to use data augmentation
-        maxProb (float): max binomial sampling probability
-    '''
-    def __init__(self, data, windowSize, depthSize, minPSNR, maxPSNR, virtSize=None, augment=True, maxProb=0.99):
-        super().__init__()
-        self.data = torch.from_numpy(data.astype(np.int32))  # [N, T, D, H, W]
-        self.crop = transforms.RandomCrop((depthSize, windowSize, windowSize))
+class BinomDataset3D(Dataset):
+    """
+    Dataset for [C, T, D, H, W] data.
+    Applies per-voxel binomial sampling to simulate noisy input.
+    Returns tensor of shape [2C, T, D, H, W]: [residual, noisy]
+    """
+    def __init__(self, data, patch_size=32, minPSNR=-40, maxPSNR=-5, virtSize=None, augment=True, maxProb=0.99):
+        self.data = torch.from_numpy(data.astype(np.int32))  # [C, T, D, H, W]
+        self.C, self.T, self.D, self.H, self.W = self.data.shape
+        self.patch_size = patch_size
         self.minPSNR = minPSNR
         self.maxPSNR = maxPSNR
-        self.windowSize = windowSize
-        self.depthSize = depthSize
         self.maxProb = maxProb
-        self.virtSize = virtSize if virtSize is not None else data.shape[0]
+        self.virtSize = virtSize
         self.augment = augment
 
     def __len__(self):
-        return self.virtSize
+        return self.virtSize if self.virtSize else self.D * self.H * self.W
 
     def __getitem__(self, idx):
-        real_idx = np.random.randint(self.data.shape[0]) if self.virtSize else idx
-        img = self.data[real_idx]  # [T, D, H, W]
+        # Random crop indices
+        z = np.random.randint(0, self.D - self.patch_size + 1)
+        y = np.random.randint(0, self.H - self.patch_size + 1)
+        x = np.random.randint(0, self.W - self.patch_size + 1)
 
-        # Apply 3D random crop
-        d_start = np.random.randint(0, img.shape[1] - self.depthSize + 1)
-        h_start = np.random.randint(0, img.shape[2] - self.windowSize + 1)
-        w_start = np.random.randint(0, img.shape[3] - self.windowSize + 1)
-        img = img[:, d_start:d_start + self.depthSize, h_start:h_start + self.windowSize, w_start:w_start + self.windowSize]
+        # Extract patch [C, T, d, h, w]
+        patch = self.data[:, :, z:z+self.patch_size, y:y+self.patch_size, x:x+self.patch_size]
 
-        # Sample binomial level based on pseudo PSNR
+        # Convert to float
+        patch = patch.type(torch.float)
+
+        # Compute target mean for PSNR-based binomial level
+        mean_val = patch.mean().item() + 1e-5
         uniform = np.random.rand() * (self.maxPSNR - self.minPSNR) + self.minPSNR
-        level = (10 ** (uniform / 10.0)) / (img.float().mean().item() + 1e-5)
+        level = (10**(uniform / 10.0)) / mean_val
         level = min(level, self.maxProb)
 
-        # Binomial sampling
-        binom = torch.distributions.binomial.Binomial(total_count=img, probs=torch.tensor([level]))
-        img_input = binom.sample()[0]  # [T, D, H, W]
-        img_target = img.float()
+        # Perform binomial sampling
+        binom = torch.distributions.binomial.Binomial(total_count=patch, probs=torch.tensor([level]))
+        noisy = binom.sample().squeeze(-1)  # match shape [C, T, d, h, w]
 
-        # Normalize per voxel over time
-        P_input = img_input / (img_input.sum(dim=0, keepdim=True) + 1e-8)
-        P_target = img_target / (img_target.sum(dim=0, keepdim=True) + 1e-8)
+        # Compute residual
+        residual = patch - noisy
 
-        out = torch.cat([P_target, P_input], dim=0)  # [2*T, D, H, W]
+        # Normalize
+        noisy_norm = noisy / (noisy.mean() + 1e-8)
+        residual_norm = residual / (residual.mean() + 1e-8)
+
+        # Stack: [2C, T, d, h, w]
+        out = torch.cat([residual_norm, noisy_norm], dim=0)
+
+        # Optional 3D flips (for augmentation)
+        if self.augment:
+            if np.random.rand() < 0.5:
+                out = torch.flip(out, dims=[2])  # flip D
+            if np.random.rand() < 0.5:
+                out = torch.flip(out, dims=[3])  # flip H
+            if np.random.rand() < 0.5:
+                out = torch.flip(out, dims=[4])  # flip W
 
         return out
-
-
-# Utility: visualize histogram at a voxel
-
-def plot_voxel_histogram(P_target, P_input, voxel=(0, 0, 0)):
-    """
-    Plot the predicted vs target distribution at a given voxel.
-    P_target, P_input: tensors [T, D, H, W]
-    voxel: (d, h, w) index
-    """
-    T = P_target.shape[0]
-    d, h, w = voxel
-    target_curve = P_target[:, d, h, w].cpu().numpy()
-    input_curve = P_input[:, d, h, w].cpu().numpy()
-
-    plt.figure(figsize=(6, 3))
-    plt.plot(range(T), target_curve, label='Target (MC)', marker='o')
-    plt.plot(range(T), input_curve, label='Input (Noisy)', marker='x')
-    plt.xlabel("Time bin")
-    plt.ylabel("Photon Probability")
-    plt.title(f"Photon Distribution at voxel (d={d}, h={h}, w={w})")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
