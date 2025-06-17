@@ -172,3 +172,17 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# custom
+/output
+/checkpoints_3d
+/notebooks
+/.vscode
+
+# data files
+*.exr
+*.json
+*.xml
+*.png
+*.npy
+*.obj
