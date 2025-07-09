@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 
 # Path
+import os
 from pathlib import Path
 
 # Custom
@@ -20,7 +21,7 @@ def get_data_loaders(config):
     full_dataset = HistogramBinomDataset(**dataset_cfg)
 
     # Compute split sizes
-    val_ratio = config.get('val_split', 0.02)
+    val_ratio = config.get('val_split', 0.2)
     total_len = len(full_dataset)
     val_len = int(total_len * val_ratio)
     train_len = total_len - val_len
@@ -68,13 +69,14 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
     for batch in dataloader:
         hist = batch['input'].to(device)        # B, 3, H, W
         target = batch['target'].to(device)     # 3, H, W
-        
-        print("Input shape: ", hist.shape)
-        print("Target shape: ", target.shape)
 
         optimizer.zero_grad()
         pred = model(hist)                      # 3, H, W
-        print("Pred shape: ", target.shape)
+        
+        # print("Input shape: ", hist.shape)
+        # print("Target shape: ", target.shape)
+        # print("Pred shape: ", target.shape)
+
         loss = criterion(pred, target)
         loss.backward()
         optimizer.step()
@@ -118,7 +120,7 @@ def train_model(config):
         mode=model_cfg['mode']
     ).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]), weight_decay=float(model_cfg["weight_decay"]))
     criterion = nn.MSELoss()
 
     best_val_loss = float('inf')
@@ -134,5 +136,6 @@ def train_model(config):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")

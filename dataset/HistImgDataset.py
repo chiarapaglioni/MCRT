@@ -58,9 +58,9 @@ class HistogramBinomDataset(Dataset):
         noisy_tensor = self.noisy_images[scene]  # (3, H, W)
         clean_tensor = self.clean_images.get(scene, None)
 
-        print("\nSPP1 Shape: ", spp1_img.shape)
-        print("Noisy Shape: ", noisy_tensor.shape)
-        print("Clean Shape: ", clean_tensor.shape)
+        # print("\nSPP1 Shape: ", spp1_img.shape)
+        # print("Noisy Shape: ", noisy_tensor.shape)
+        # print("Clean Shape: ", clean_tensor.shape)
 
         indices = list(range(self.low_spp))
         random.shuffle(indices)
@@ -70,21 +70,22 @@ class HistogramBinomDataset(Dataset):
         input_samples = spp1_img[input_indices]  # (N-1, H, W, 3)
         target_sample = spp1_img[target_index]   # (H, W, 3)
 
-        print("Input Shape: ", input_samples.shape)
-        print("Target Shape: ", target_sample.shape)
+        # print("Input Shape: ", input_samples.shape)
+        # print("Target Shape: ", target_sample.shape)
 
         if self.mode == 'hist':
             input_hist, _ = generate_histograms(input_samples, self.hist_bins)  # (H, W, 3, bins)
-            print("Input Hist Shape: ", input_hist.shape)
+            # print("Input Hist Shape: ", input_hist.shape)
             input_hist = np.transpose(input_hist, (2, 3, 0, 1))  # → (3, bins, H, W)
             input_tensor = torch.from_numpy(input_hist).float()
 
         else:
             input_avg = input_samples.mean(axis=0)  # (H, W, 3)
-            print("Input Image Shape: ", input_avg.shape)
+            # print("Input Image Shape: ", input_avg.shape)
             input_tensor = torch.from_numpy(input_avg).permute(2, 0, 1).float()  # (3, H, W)
 
         target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()  # (3, H, W)
+        # print("Target Shape: ", target_tensor.shape)
 
         # --- RANDOM CROP ---
         if self.crop_size:
