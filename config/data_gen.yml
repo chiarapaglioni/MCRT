@@ -1,0 +1,13 @@
+mi_variant: "scalar_rgb"  # "cuda_ad_rgb" for GPU or "llvm_ad_rgb" for vectorised and "scalar_rgb" (default) for CPU
+
+low_spp: 16               # Noisy image SPP (samples per pixel)
+high_spp: 100             # Clean image SPP
+
+width: 512                # Image width (only used indirectly via sensor / scene)
+height: 512               # Image height
+
+log_bin: false            # Binning strategy (not currently used in this script)
+debug: false              # Debug mode (used in SceneRenderer)
+
+input_path: "data"       # Path containing scene folders or zips
+output_path: "output"    # Where rendered outputs will be saved
