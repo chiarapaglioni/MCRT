@@ -1,0 +1,15 @@
+# General DataLoader settings
+batch_size: 2
+num_workers: 2
+shuffle: false
+
+dataset:
+  root_dir: out                   # Relative to project root
+  crop_size: 128
+  low_spp: 16
+  high_spp: 100
+  hist_bins: 8
+  mode: hist                       # Options: 'hist' for hist2noise or 'img' for noise2noise
+  data_augmentation: false
+  virt_size: 100
+  clean: true                      # Whether to include 'clean' targets if available
