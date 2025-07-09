@@ -18,22 +18,22 @@ def main():
     config_path = Path(args.config) if args.config else Path(f"config/{task}.yml")
     config = load_config(config_path)
 
-    # RENDERING DATA GENERATION
+    # RENDERING DATA GENERATION (OK) <3
     if task == "data_gen":
         from renderer.RenderingPipeline import generate_data
         generate_data(config)
 
-    # DATA LOADER
+    # DATA LOADER (OK) <3
     elif task == "data_loader":
-        from model.HistogramLoader import test_data_loader
+        from dataset.HistogramLoader import test_data_loader
         test_data_loader(config)
 
-    # TRAIN
+    # TODO: TRAIN
     elif task == "train":
         from model.DenoisingPipeline import train_model
         train_model(config)
     
-    # EVAL
+    # TODO: EVAL
     elif task == "eval":
         from model.DenoisingPipeline import evaluate_model
         evaluate_model(config)

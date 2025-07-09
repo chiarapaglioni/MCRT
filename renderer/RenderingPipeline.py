@@ -1,19 +1,23 @@
 # Data Processing + Utils
 import zipfile
-import tifffile
 import tempfile
 import numpy as np
 from pathlib import Path
 
 # Mitsuba Renderer
 import mitsuba as mi
-from renderer.SceneRenderer import SceneRenderer
 
 # Image Processing and Visialisation
 import matplotlib.pyplot as plt
 
 # PSNR
 from skimage.metrics import peak_signal_noise_ratio
+
+# Custom
+from utils.utils import save_tiff
+from renderer.SceneRenderer import SceneRenderer
+
+
 
 def extract_scene_zip(zip_path):
     """
@@ -85,17 +89,6 @@ def plot_images(clean_image, noisy_image, noisy_avg_image):
 
     plt.tight_layout()
     plt.show()
-
-def save_tiff(data, file_name):
-    """
-    Saves data of shape (N, H, W, C, B) to TIFF file using BigTIFF if needed.
-
-    Parameters:
-    - data (np array): data to save
-    - file_name (str): file name / scene name
-    """
-    tifffile.imwrite(file_name, data, compression='lzw', bigtiff=True)
-    print(f"Saved {file_name} with shape {data.shape} <3")
 
 def calculate_psnr_rgb(low_img_tensor, high_img_tensor):
     """Load RGB TIFFs and compute PSNR between low- and high-spp images."""
