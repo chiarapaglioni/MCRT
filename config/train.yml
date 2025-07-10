@@ -1,29 +1,29 @@
 dataset:
   root_dir: output                  # Relative to project root
-  crop_size: 64
-  low_spp: 16
-  high_spp: 100
-  hist_bins: 10
-  mode: hist                        # Options: 'hist' for hist2noise or 'img' for noise2noise
-  data_augmentation: false
-  virt_size: 30
+  crop_size: 256
+  low_spp: 32
+  high_spp: 4500
+  hist_bins: 16
+  mode: img                        # Options: 'hist' for hist2noise or 'img' for noise2noise
+  data_augmentation: true
+  virt_size: 5000
   clean: true                       # Whether to include 'clean' targets if available
 
 model:
   in_channels: 3
-  n_bins: 10
+  n_bins: 16
   out_mode: mean        # 'mean' or 'distribution'
   merge_mode: concat    # 'add' or 'concat'
-  depth: 2
+  depth: 3
   start_filters: 64
-  mode: hist            # 'hist' or 'img'
+  mode: img            # 'hist' or 'img'
   learning_rate: 1e-4
   weight_decay: 1e-5 
 
 # General DataLoader settings
-batch_size: 2
-num_workers: 2
-shuffle: false
+batch_size: 32
+num_workers: 4
+shuffle: true
 
 val_split: 0.2  # 2% validation split
 
