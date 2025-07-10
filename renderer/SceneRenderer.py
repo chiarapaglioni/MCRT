@@ -24,6 +24,7 @@ class SceneRenderer:
         Returns:
         - image (ndarray): (height, width, 3)
         """
+        print("Using.. scalar_rgb")
         mi.set_variant("scalar_rgb")
         scene = mi.load_file(str(self.scene_path))
 

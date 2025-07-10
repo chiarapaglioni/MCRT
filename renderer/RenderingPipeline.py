@@ -101,11 +101,7 @@ def calculate_psnr_rgb(low_img_tensor, high_img_tensor):
     psnr = peak_signal_noise_ratio(high_img, low_img, data_range=data_range)
     print(f"PSNR: {psnr} !!!")
 
-def render_scene(scene_path, output_dir, low_spp, high_spp):
-    scene = mi.load_file(str(scene_path))
-    sensor = scene.sensors()[0]
-    integrator = scene.integrator()
-
+def render_scene(scene_path, output_dir, mi_variant, low_spp, high_spp):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Get parts for filename
@@ -123,6 +119,14 @@ def render_scene(scene_path, output_dir, low_spp, high_spp):
     # Compute average of the low SPP images for comparison
     img_low_avg = np.mean(stack_low, axis=0)
 
+    # mitsuba variant
+    mi.set_variant(mi_variant)
+    print("Using.. ", mi_variant)
+
+    scene = mi.load_file(str(scene_path))
+    sensor = scene.sensors()[0]
+    integrator = scene.integrator()
+
     # LOW SPP
     img_low = mi.render(scene, sensor=sensor, integrator=integrator, spp=low_spp)
     low_out_path = output_dir / f"{scene_folder_name}_{xml_name}_spp{low_spp}.tiff"
@@ -139,33 +143,11 @@ def render_scene(scene_path, output_dir, low_spp, high_spp):
     calculate_psnr_rgb(img_low_avg, img_high)
     plot_images(img_high, img_low, img_low_avg)
 
-def render_1ray_scene(xml_file, output_dir, n_images=10, spp=1, base_seed=0, debug=False):
-    """
-    Renders a scene from an XML file and saves a multi-page TIFF.
-    """
-    print(f"Rendering scene: {xml_file}")
-    
-    mi.set_variant('scalar_rgb')
-    scene = mi.load_file(str(xml_file))
-    
-    renderer = SceneRenderer(scene, debug=debug)
-    images = renderer.render_n_images(n=n_images, spp=spp, seed_start=base_seed)
-
-    # Construct output filename
-    tiff_name = xml_file.stem + "_rendered.tiff"
-    output_path = output_dir / tiff_name
-
-    renderer.save_images_to_tiff(images, output_path)
-
 def generate_data(config):
     """
     Process all scene folders inside root_folder.
     Expects scene XML files inside each folder.
     """
-    # mitsuba variant
-    mi.set_variant(config["mi_variant"])
-    print("Using.. ", config["mi_variant"])
-
     # paths
     root_folder = Path(config['input_path'])
     output_root = Path(config['output_path'])
@@ -188,4 +170,4 @@ def generate_data(config):
 
         # render all xml files of a scene
         for xml_file in xml_files:
-            render_scene(xml_file, output_dir, low_spp=config['low_spp'], high_spp=config['high_spp'])
+            render_scene(xml_file, output_dir, mi_variant=config["mi_variant"], low_spp=config['low_spp'], high_spp=config['high_spp'])
