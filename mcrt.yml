@@ -7,6 +7,7 @@ dependencies:
   - python=3.9
   - numpy=1.22.3
   - scikit-learn=1.1.1
+  - scikit-image
   - matplotlib=3.5.2
   - tifffile=2022.5.4
   - pip=22.1.2
