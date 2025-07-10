@@ -36,8 +36,8 @@ conda activate mcrt
 ## How to Run
 From project root: 
 ```bash
-python main.py data_gen
-python main.py data_loader
-python main.py train
-python main.py eval
+python launch.py data_gen
+python launch.py data_loader
+python launch.py train
+python launch.py eval
 ```
