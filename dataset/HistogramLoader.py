@@ -48,13 +48,11 @@ def test_data_loader(config):
             print(f"Green pixel histogram counts at ({x},{y}):", g_pixel_hist)
             print(f"Blue pixel histogram counts at ({x},{y}):", b_pixel_hist)
 
-            print("Sum of bins per channel at this pixel:")
-            print("Red:", r_pixel_hist.sum())
-            print("Green:", g_pixel_hist.sum())
-            print("Blue:", b_pixel_hist.sum())
-
-            # Optional: plot histograms for the pixel
-            import matplotlib.pyplot as plt
+            if config['debug']: 
+                print("Sum of bins per channel at this pixel:")
+                print("Red:", r_pixel_hist.sum())
+                print("Green:", g_pixel_hist.sum())
+                print("Blue:", b_pixel_hist.sum())            
 
             bins = range(len(r_pixel_hist))  # number of bins
 

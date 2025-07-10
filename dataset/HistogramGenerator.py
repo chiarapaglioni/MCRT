@@ -1,7 +1,7 @@
 
 import numpy as np
 
-def estimate_range(samples):
+def estimate_range(samples, debug=False):
     """
     Estimate binning range using 1st and 99th percentiles.
     Supports shape (N, H, W, 3).
@@ -21,7 +21,8 @@ def estimate_range(samples):
     if min_val == max_val:
         max_val *= 1.1
 
-    print(f"Linear estimated radiance range: [{min_val:.4e}, {max_val:.4e}]")
+    if debug:
+        print(f"Linear estimated radiance range: [{min_val:.4e}, {max_val:.4e}]")
     return min_val, max_val
 
 def accumulate_histogram(hist, samples, bin_edges, num_bins):
@@ -41,9 +42,9 @@ def accumulate_histogram(hist, samples, bin_edges, num_bins):
             bincounts[:, :, b] = (bins[:, :, :, c] == b).sum(axis=0)
         hist[:, :, c, :] = bincounts  # replace not add to avoid accumulation
 
-def generate_histograms(samples, num_bins):
+def generate_histograms(samples, num_bins, debug=False):
     _, H, W, _ = samples.shape
-    min_val, max_val = estimate_range(samples)
+    min_val, max_val = estimate_range(samples, debug=debug)
     bin_edges = np.linspace(min_val, max_val, num_bins + 1)  # +1 for edges
 
     hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
