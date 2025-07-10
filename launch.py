@@ -28,7 +28,7 @@ def main():
         from dataset.HistogramLoader import test_data_loader
         test_data_loader(config)
 
-    # TODO: TRAIN
+    # TRAIN (OK) <3
     elif task == "train":
         from model.DenoisingPipeline import train_model
         train_model(config)

@@ -7,8 +7,8 @@ HEIGHT = 512
 DEBUG = False
 
 class SceneRenderer:
-    def __init__(self, scene, width=WIDTH, height=HEIGHT, debug=DEBUG):
-        self.scene = scene
+    def __init__(self, scene_path, width=WIDTH, height=HEIGHT, debug=DEBUG):
+        self.scene_path = scene_path
         self.width = width
         self.height = height
         self.debug = debug
@@ -24,13 +24,16 @@ class SceneRenderer:
         Returns:
         - image (ndarray): (height, width, 3)
         """
+        mi.set_variant("scalar_rgb")
+        scene = mi.load_file(str(self.scene_path))
+
         x, y = self.width // 2, self.height // 2
 
-        old_sensor = self.scene.sensors()[0]
+        old_sensor = scene.sensors()[0]
         params = mi.traverse(old_sensor)
 
         # Retrieve integrator
-        old_integrator = self.scene.integrator()
+        old_integrator = scene.integrator()
         integrator_params = mi.traverse(old_integrator)
 
         new_sensor = mi.load_dict({
@@ -62,7 +65,7 @@ class SceneRenderer:
             'hide_emitters': hide_emitters
         })
 
-        image = mi.render(self.scene, spp=spp, sensor=new_sensor, integrator=new_integrator, seed=seed)
+        image = mi.render(scene, spp=spp, sensor=new_sensor, integrator=new_integrator, seed=seed)
 
         if self.debug:
             print("Rendered Image:", image.shape)

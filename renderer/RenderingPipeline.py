@@ -114,7 +114,7 @@ def render_scene(scene_path, output_dir, low_spp, high_spp):
     print(f"Rendering {scene_path.name} .....")
 
     # 1 SPP MULTI-RENDER
-    renderer = SceneRenderer(scene, debug=False)
+    renderer = SceneRenderer(scene_path, debug=False)
     low_images = renderer.render_n_images(n=low_spp, spp=1, seed_start=0)
     stack_low = np.stack(low_images, axis=0)
     low_tiff_path = output_dir / f"{scene_folder_name}_{xml_name}_spp1x{low_spp}.tiff"
