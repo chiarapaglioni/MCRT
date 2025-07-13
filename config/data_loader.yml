@@ -1,10 +1,11 @@
 # General DataLoader settings
 batch_size: 32
-num_workers: 10
+num_workers: 8
 shuffle: false
+debug: true
 
 dataset:
-  root_dir: output                   # Relative to project root
+  root_dir: output                  # Relative to project root
   crop_size: 256
   low_spp: 32
   high_spp: 4500

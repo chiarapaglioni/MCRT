@@ -12,7 +12,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Run Data Generation",
+            "name": "Data Generation",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
@@ -20,7 +20,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Run Data Loader",
+            "name": "Data Loader",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
@@ -28,15 +28,15 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Run Training",
+            "name": "Training",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
-            "args": ["train", "--config", "config/train_hist2noise.yml"],
+            "args": ["train", "--config", "config/train.yml"],
             "console": "integratedTerminal"
         },
         {
-            "name": "Run Evaluation",
+            "name": "Evaluation",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",

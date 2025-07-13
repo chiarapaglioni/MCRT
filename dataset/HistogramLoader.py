@@ -28,41 +28,44 @@ def test_data_loader(config):
 
         # Optional: visualize histograms
         if dataset.mode == 'hist':
-            input_hist = batch['input'][0]  # shape: (3, B, H, W)
+            input_hist = batch['input'][0]  # shape: (3, bins+2, H, W)
+            print("Histogram shape (C, B+2, H, W):", input_hist.shape)
 
-            print("Histogram shape (C, B, H, W):", input_hist.shape)
-
-            # Convert to numpy for inspection
             input_hist_np = input_hist.numpy()
 
-            # Choose a pixel coordinate, for example (x=100, y=150)
+            # Choose a pixel coordinate
             x, y = 50, 50
 
-            # input_hist_np shape: (3, B, H, W)
-            # Extract histogram bins counts for that pixel for each channel:
-            r_pixel_hist = input_hist_np[0, :, y, x]  # shape (B,)
-            g_pixel_hist = input_hist_np[1, :, y, x]
-            b_pixel_hist = input_hist_np[2, :, y, x]
+            num_bins = config['dataset']['hist_bins']  # e.g., 8
 
-            print(f"Red pixel histogram counts at ({x},{y}):", r_pixel_hist)
-            print(f"Green pixel histogram counts at ({x},{y}):", g_pixel_hist)
-            print(f"Blue pixel histogram counts at ({x},{y}):", b_pixel_hist)
+            # Extract hist bins and stats
+            r_hist = input_hist_np[0, :num_bins, y, x]
+            g_hist = input_hist_np[1, :num_bins, y, x]
+            b_hist = input_hist_np[2, :num_bins, y, x]
 
-            if config['debug']: 
-                print("Sum of bins per channel at this pixel:")
-                print("Red:", r_pixel_hist.sum())
-                print("Green:", g_pixel_hist.sum())
-                print("Blue:", b_pixel_hist.sum())            
+            r_mean = input_hist_np[0, num_bins, y, x]
+            g_mean = input_hist_np[1, num_bins, y, x]
+            b_mean = input_hist_np[2, num_bins, y, x]
 
-            bins = range(len(r_pixel_hist))  # number of bins
+            r_var = input_hist_np[0, num_bins + 1, y, x]
+            g_var = input_hist_np[1, num_bins + 1, y, x]
+            b_var = input_hist_np[2, num_bins + 1, y, x]
 
-            plt.plot(bins, r_pixel_hist, label='Red')
-            plt.plot(bins, g_pixel_hist, label='Green')
-            plt.plot(bins, b_pixel_hist, label='Blue')
+            # Print
+            print(f"Pixel ({x},{y}):")
+            print(f"  Red   - bins: {r_hist}, mean: {r_mean:.4f}, var: {r_var:.4f}")
+            print(f"  Green - bins: {g_hist}, mean: {g_mean:.4f}, var: {g_var:.4f}")
+            print(f"  Blue  - bins: {b_hist}, mean: {b_mean:.4f}, var: {b_var:.4f}")
+
+            # Plot
+            bins = range(num_bins)
+            plt.plot(bins, r_hist, label='Red')
+            plt.plot(bins, g_hist, label='Green')
+            plt.plot(bins, b_hist, label='Blue')
             plt.xlabel('Bin')
             plt.ylabel('Counts')
             plt.title(f'Histogram bin counts for pixel ({x},{y})')
             plt.legend()
             plt.show()
-        
+                
         break

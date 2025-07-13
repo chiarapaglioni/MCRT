@@ -12,6 +12,14 @@ from pathlib import Path
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
 
+
+# GPU Check
+if not torch.cuda.is_available():
+    print("GPU not found, code will run on CPU and can be extremely slow!")
+else:
+    device = torch.device("cuda:0")
+
+
 def get_data_loaders(config):
     # Resolve root_dir path
     dataset_cfg = config['dataset'].copy()
@@ -29,13 +37,16 @@ def get_data_loaders(config):
     # Split dataset
     train_dataset, val_dataset = random_split(full_dataset, [train_len, val_len])
 
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Val dataset size: {len(val_dataset)}")
+
     # Create DataLoaders with differing shuffle flags
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['batch_size'],
         shuffle=True,
         num_workers=config['num_workers'],
-        pin_memory=True,
+        pin_memory=False,
         drop_last=True
     )
 
@@ -44,15 +55,12 @@ def get_data_loaders(config):
         batch_size=config['batch_size'],
         shuffle=False,
         num_workers=config['num_workers'],
-        pin_memory=True,
-        drop_last=True
+        pin_memory=False,
+        drop_last=False
     )
 
     train_img = next(iter(train_loader))
-    print(f"Train dataset size: {len(train_dataset)}")
-    print(f"Val dataset size: {len(val_dataset)}")
 
-    print("TRAIN DATA LOADER STATS")
     print("Input shape:", train_img['input'].shape)
     print("Target shape:", train_img['target'].shape)
     print("Noisy shape:", train_img['noisy'].shape)
@@ -108,16 +116,21 @@ def train_model(config):
 
     train_loader, val_loader = get_data_loaders(config)
 
+    dataset_cfg = config['dataset']
     model_cfg = config['model']
+
+    print(f"\nDataset Config: {config['dataset']['mode'].upper()} mode | Crop Size: {config['dataset']['crop_size']} | Augmentation: {config['dataset']['data_augmentation']}")
+    print(f"Model Config: Depth={config['model']['depth']} | Start Filters={config['model']['start_filters']} | Output: {config['model']['out_mode']}")
+    print(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
 
     model = UNet(
         in_channels=model_cfg['in_channels'],
-        n_bins=model_cfg['n_bins'],
+        n_bins=dataset_cfg['hist_bins'],
         out_mode=model_cfg['out_mode'],
         merge_mode=model_cfg['merge_mode'],
         depth=model_cfg['depth'],
         start_filters=model_cfg['start_filters'],
-        mode=model_cfg['mode']
+        mode=dataset_cfg['mode']
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]), weight_decay=float(model_cfg["weight_decay"]))
@@ -127,7 +140,7 @@ def train_model(config):
     num_epochs = config["num_epochs"]
     save_path = config["save_path"]
 
-    print("\n !!!!! Training !!!!!!")
+    print("TRAINING STARTED !")
     for epoch in range(num_epochs):
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
         val_loss = validate_epoch(model, val_loader, criterion, device)

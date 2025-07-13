@@ -53,6 +53,7 @@ class HistogramBinomDataset(Dataset):
         return self.virt_size
 
     def __getitem__(self, idx):
+        # TODO: make sure to return unique scene names (multiple xml in the same folder)
         scene = random.choice(self.scene_names)
         spp1_img = self.spp1_images[scene]  # (low_spp, H, W, 3)
         noisy_tensor = self.noisy_images[scene]  # (3, H, W)
@@ -75,9 +76,15 @@ class HistogramBinomDataset(Dataset):
 
         if self.mode == 'hist':
             input_hist, _ = generate_histograms(input_samples, self.hist_bins)  # (H, W, 3, bins)
-            # print("Input Hist Shape: ", input_hist.shape)
-            input_hist = np.transpose(input_hist, (2, 3, 0, 1))  # → (3, bins, H, W)
-            input_tensor = torch.from_numpy(input_hist).float()
+            
+            # Inlcude mean and variance alongside histogram raw counts
+            mean = input_samples.mean(axis=0)[..., None]  # (H, W, 3, 1)
+            var = input_samples.var(axis=0)[..., None]    # (H, W, 3, 1)
+
+            input_hist_with_stats = np.concatenate([input_hist, mean, var], axis=-1)  # (H, W, 3, bins+2)
+            input_hist_with_stats = np.transpose(input_hist_with_stats, (2, 3, 0, 1))  # (3, bins+2, H, W)
+            
+            input_tensor = torch.from_numpy(input_hist_with_stats).float()
 
         else:
             input_avg = input_samples.mean(axis=0)  # (H, W, 3)
@@ -118,12 +125,12 @@ class HistogramBinomDataset(Dataset):
 
         # --- Final dictionary ---
         sample = {
-            'input': input_tensor,     # (3, bins, H, W) or (3, H, W)
-            'target': target_tensor,   # (3, H, W)
-            'noisy': noisy_tensor,
-            'scene': scene
+            'input': input_tensor,      # (3, bins, H, W) or (3, H, W)
+            'target': target_tensor,    # (3, H, W)
+            'noisy': noisy_tensor,      # (3, H, W)
+            'scene': scene              # (str) name of the scene
         }
         if clean_tensor is not None:
-            sample['clean'] = clean_tensor
+            sample['clean'] = clean_tensor  # (3, H, W)
 
         return sample

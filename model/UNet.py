@@ -90,7 +90,9 @@ class UNet(nn.Module):
 
         # Determine input channels based on mode
         if self.mode == 'hist':
-            self.input_channels = in_channels * n_bins
+            # self.input_channels = in_channels * n_bins
+            # include mean + variance: 
+            self.input_channels = in_channels * (n_bins + 2)
         else:  # 'img' mode
             self.input_channels = in_channels
 
@@ -130,6 +132,7 @@ class UNet(nn.Module):
         if self.mode == 'hist':
             B, C, bins, H, W = x.shape
             x = x.view(B, C * bins, H, W)
+
         else:  # 'img' mode
             # input is already (B, 3, H, W)
             pass

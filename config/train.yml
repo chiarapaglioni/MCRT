@@ -6,17 +6,15 @@ dataset:
   hist_bins: 16
   mode: img                        # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
-  virt_size: 5000
+  virt_size: 10000
   clean: true                       # Whether to include 'clean' targets if available
 
 model:
   in_channels: 3
-  n_bins: 16
   out_mode: mean        # 'mean' or 'distribution'
   merge_mode: concat    # 'add' or 'concat'
   depth: 3
   start_filters: 64
-  mode: img            # 'hist' or 'img'
   learning_rate: 1e-4
   weight_decay: 1e-5 
 
