@@ -9,6 +9,7 @@ dataset:
   data_augmentation: true
   virt_size: 1000
   clean: true                       # Whether to include 'clean' targets if available
+  debug: false
 
 model:
   in_channels: 3

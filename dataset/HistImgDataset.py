@@ -12,7 +12,7 @@ class HistogramBinomDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
                 data_augmentation: bool = True, virt_size: int = 1000,
                 low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
-                clean: bool = False, cached_dir: str = None):
+                clean: bool = False, cached_dir: str = None, debug: bool = False):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -23,6 +23,7 @@ class HistogramBinomDataset(Dataset):
         self.hist_bins = hist_bins
         self.clean = clean
         self.cached_dir = cached_dir
+        self.debug = debug
 
         self.spp1_images = {}
         self.noisy_images = {}
@@ -86,8 +87,8 @@ class HistogramBinomDataset(Dataset):
         target_sample = spp1_img[target_index]   # (H, W, 3)
 
         # DEBUG INPUT-TARGET VALUES
-        debug_coords = [(64, 64), (128, 128), (0, 0)]
-        for y, x in debug_coords:
+        if self.debug:
+            y, x = 64, 64
             avg_pixel = input_samples[:, y, x, :].mean(axis=0)     # mean across N-1
             target_pixel = target_sample[y, x, :]                  # single target
 
