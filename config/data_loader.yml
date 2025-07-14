@@ -1,16 +1,17 @@
-# General DataLoader settings
+# General settings
 batch_size: 32
 num_workers: 8
 shuffle: false
 debug: true
 
 dataset:
-  root_dir: output                  # Relative to project root
+  root_dir: output                      # Raw dataset location
+  cached_dir: histograms                # Cached histograms are saved
   crop_size: 256
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
-  mode: hist                       # Options: 'hist' for hist2noise or 'img' for noise2noise
+  mode: img                            # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: false
-  virt_size: 10000
-  clean: true                      # Whether to include 'clean' targets if available
+  virt_size: 1000
+  clean: true                           # Whether to include 'clean' targets if available

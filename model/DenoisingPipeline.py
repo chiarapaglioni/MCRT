@@ -96,7 +96,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
 
 def validate_epoch(model, dataloader, criterion, device):
     model.eval()
-    total_loss = 0
+    total_loss = 0 
 
     with torch.no_grad():
         for batch in dataloader:
