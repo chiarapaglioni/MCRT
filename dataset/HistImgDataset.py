@@ -72,12 +72,16 @@ class HistogramBinomDataset(Dataset):
     def __len__(self):
         return self.virt_size
 
-    def __getitem__(self, idx):
-        scene = random.choice(self.scene_names)
-        spp1_img = self.spp1_images[scene]  # (low_spp, H, W, 3)
-        noisy_tensor = self.noisy_images[scene]  # (3, H, W)
+    def __getitem__(self, idx, seed=None, crop_coords=None):
+        if seed is not None:
+            random.seed(seed)  # make shuffle deterministic
+
+        scene = self.scene_names[idx % len(self.scene_names)]
+        spp1_img = self.spp1_images[scene]
+        noisy_tensor = self.noisy_images[scene]
         clean_tensor = self.clean_images.get(scene, None)
 
+        # Consistent sample selection
         indices = list(range(self.low_spp))
         random.shuffle(indices)
         input_indices = indices[:-1]
@@ -86,108 +90,60 @@ class HistogramBinomDataset(Dataset):
         input_samples = spp1_img[input_indices]  # (N-1, H, W, 3)
         target_sample = spp1_img[target_index]   # (H, W, 3)
 
-        # DEBUG INPUT-TARGET VALUES
-        if self.debug:
-            y, x = 64, 64
-            avg_pixel = input_samples[:, y, x, :].mean(axis=0)     # mean across N-1
-            target_pixel = target_sample[y, x, :]                  # single target
-
-            print(f"[DEBUG] Scene: {scene} | Pixel ({x},{y})")
-            print(f"Input Mean RGB:  {avg_pixel}")
-            print(f"Target Sample RGB: {target_pixel}\n")
-
-        # HISTOGRAM MODE
+        # HIST MODE
         if self.mode == 'hist':
             if self.cached_dir is None:
-                raise RuntimeError("Histogram mode requires 'cached_dir' for caching.")
+                raise RuntimeError("Histogram mode requires 'cached_dir'.")
 
             cache_path = os.path.join(self.cached_dir, f"{scene}_hist.npz")
-
-            # Load or Generate Histogram if it doesn't already exist 
             if os.path.exists(cache_path):
-                features = np.load(cache_path)['features']  # (H, W, 3, bins+2)
-                
-                # Split the features
-                hist = features[..., :self.hist_bins]                    # (H, W, 3, bins)
-                mean = features[..., self.hist_bins:self.hist_bins+1]    # (H, W, 3, 1)
-                var = features[..., self.hist_bins+1:self.hist_bins+2]   # (H, W, 3, 1)
-
-                # Normalize histogram
+                features = np.load(cache_path)['features']
+                hist = features[..., :self.hist_bins]
+                mean = np.log1p(features[..., self.hist_bins:self.hist_bins+1])
+                var = np.log1p(features[..., self.hist_bins+1:self.hist_bins+2])
                 hist /= (np.sum(hist, axis=-1, keepdims=True) + 1e-8)
-
-                # Log1p-transform mean and variance
-                mean = np.log1p(mean)
-                var = np.log1p(var)
-
-                # Re-concatenate
                 features = np.concatenate([hist, mean, var], axis=-1)
-
             else:
-                # Compute histogram on input samples
                 full_hist, _ = generate_histograms(input_samples, self.hist_bins)
-
-                # Normalize histogram
                 full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
-
-                # Log1p transform mean and variance
                 full_mean = np.log1p(input_samples.mean(axis=0))[..., None]
                 full_var = np.log1p(input_samples.var(axis=0))[..., None]
-
                 features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
                 np.savez_compressed(cache_path, features=features)
-                print(f"[CACHE] Created {cache_path}")
 
-            # Convert to (3, bins+2, H, W)
             input_tensor = torch.from_numpy(np.transpose(features, (2, 3, 0, 1))).float()
 
-        # IMAGE MODE
-        else:
-            input_avg = input_samples.mean(axis=0)  # (H, W, 3)
-            input_tensor = torch.from_numpy(input_avg).permute(2, 0, 1).float()  # (3, H, W)
-            
-            # NORMALISE avg image
-            input_avg = np.log1p(input_avg)
-        
-        target_sample = np.log1p(target_sample)
-        target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()  # (3, H, W)
+        else:  # 'img' mode
+            input_avg = input_samples.mean(axis=0)
+            input_tensor = torch.from_numpy(np.log1p(input_avg)).permute(2, 0, 1).float()
 
-        # RANDOM CROP
+        # Target
+        target_sample = np.log1p(target_sample)
+        target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()
+
+        # CROP
         if self.crop_size:
-            i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
+            if crop_coords is None:
+                i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
+            else:
+                i, j, h, w = crop_coords
+
             if self.mode == 'hist':
-                input_tensor = input_tensor[:, :, i:i+h, j:j+w]  # (3, bins+2, H, W)
+                input_tensor = input_tensor[:, :, i:i+h, j:j+w]
             else:
                 input_tensor = input_tensor[:, i:i+h, j:j+w]
+
             target_tensor = target_tensor[:, i:i+h, j:j+w]
             noisy_tensor = noisy_tensor[:, i:i+h, j:j+w]
             if clean_tensor is not None:
                 clean_tensor = clean_tensor[:, i:i+h, j:j+w]
 
-        # DATA AUGMENTATION
-        if self.data_augmentation:
-            if random.random() < 0.5:
-                flip_dim = 3 if self.mode == 'hist' else 2
-                input_tensor = torch.flip(input_tensor, dims=[flip_dim])
-                target_tensor = torch.flip(target_tensor, dims=[2])
-                noisy_tensor = torch.flip(noisy_tensor, dims=[2])
-                if clean_tensor is not None:
-                    clean_tensor = torch.flip(clean_tensor, dims=[2])
-            if random.random() < 0.5:
-                flip_dim = 2 if self.mode == 'hist' else 1
-                input_tensor = torch.flip(input_tensor, dims=[flip_dim])
-                target_tensor = torch.flip(target_tensor, dims=[1])
-                noisy_tensor = torch.flip(noisy_tensor, dims=[1])
-                if clean_tensor is not None:
-                    clean_tensor = torch.flip(clean_tensor, dims=[1])
-
-        # FINAL DICTIONARY
-        sample = {
-            'input': input_tensor,      # (3, bins, H, W) or (3, H, W)
-            'target': target_tensor,    # (3, H, W)
-            'noisy': noisy_tensor,      # (3, H, W)
-            'scene': scene              # (str) name of the scene
+        # FINAL DICT
+        return {
+            "input": input_tensor,
+            "target": target_tensor,
+            "noisy": noisy_tensor,
+            "clean": clean_tensor if clean_tensor is not None else None,
+            "scene": scene,
+            "crop_coords": (i, j, h, w) if self.crop_size else None
         }
-        if clean_tensor is not None:
-            sample['clean'] = clean_tensor  # (3, H, W)
-
-        return sample

@@ -219,7 +219,10 @@ def evaluate_sample(model, input_tensor, target_tensor):
 
 
 def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
-    def to_img(t): return t.detach().cpu().numpy().transpose(1, 2, 0)
+    def to_img(t):
+        if t.dim() == 4:  # [1, 3, H, W]
+            t = t.squeeze(0)
+        return t.detach().cpu().numpy().transpose(1, 2, 0)
     
     fig, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
     axes[0].imshow(to_img(noisy));       axes[0].set_title("Noisy Input")
@@ -232,57 +235,47 @@ def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
     plt.tight_layout(); plt.show()
 
 
-def evaluate_model():
+def evaluate_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Evaluating on device: {device}")
 
-    idx = 0  # Sample index to visualize
+    # Read evaluation parameters from config
+    idx = config["eval"]["idx"]
+    seed = config["eval"]["seed"]
 
-    # --- Dataset config ---
-    dataset_cfg = {
-        "root_dir": "output",
-        "cached_dir": "histograms",
-        "crop_size": 256,
-        "low_spp": 32,
-        "high_spp": 4500,
-        "hist_bins": 16,
-        "mode": "hist",  # will override below
-        "data_augmentation": False,
-        "virt_size": 100,
-        "clean": True,
-        "debug": False
-    }
+    # Dataset config
+    dataset_cfg = config["dataset"]
 
-    # === DataLoaders with shuffle=False ===
+    # Load datasets using config values
     hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
     img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
 
-    hist_loader = DataLoader(hist_dataset, batch_size=1, shuffle=False)
-    img_loader = DataLoader(img_dataset, batch_size=1, shuffle=False)
+    # Get samples
+    hist_sample = hist_dataset.__getitem__(idx, seed=seed)
+    crop_coords = hist_sample["crop_coords"]
+    img_sample = img_dataset.__getitem__(idx, seed=seed, crop_coords=crop_coords)
 
-    # Get the same sample from both
-    hist_sample = list(hist_loader)[idx]
-    img_sample = list(img_loader)[idx]
+    # Prepare inputs for model
+    hist_input = hist_sample["input"].unsqueeze(0).to(device)
+    img_input = img_sample["input"].unsqueeze(0).to(device)
+    target = hist_sample["target"].to(device)
+    noisy = hist_sample["noisy"].to(device)
+    clean = hist_sample.get("clean", None)
+    if clean is not None:
+        clean = clean.to(device)
+    scene = hist_sample["scene"]
 
-    # --- Move to device ---
-    hist_input = hist_sample["input"].to(device)
-    img_input = img_sample["input"].to(device)
-    target     = hist_sample["target"].to(device)
-    noisy      = hist_sample["noisy"].to(device)
-    clean      = hist_sample["clean"].to(device) if "clean" in hist_sample else None
-    scene_name = hist_sample["scene"][0]
+    # Load models from checkpoint paths in config
+    hist_model = load_model(config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    img_model = load_model(config["eval"]["img_checkpoint"], mode="img", device=device)
 
-    # --- Load models ---
-    hist_model = load_model("checkpoints/2025-07-15_hist2noise_mean_bins16.pth", mode="hist", device=device)
-    img_model = load_model("checkpoints/2025-07-15_noise2noise_mean_binsimg.pth", mode="img", device=device)
-
-    # --- Predict ---
+    # Evaluate models
     hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, target)
     img_pred, img_psnr = evaluate_sample(img_model, img_input, target)
 
-    print(f"\nScene: {scene_name}")
+    print(f"\nScene: {scene}")
     print(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
     print(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
-    # --- Plot results ---
+    # Plot results
     plot_images(noisy, hist_pred, img_pred, target, clean=clean)
