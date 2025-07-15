@@ -103,13 +103,36 @@ class HistogramBinomDataset(Dataset):
 
             cache_path = os.path.join(self.cached_dir, f"{scene}_hist.npz")
 
+            # Load or Generate Histogram if it doesn't already exist 
             if os.path.exists(cache_path):
                 features = np.load(cache_path)['features']  # (H, W, 3, bins+2)
+                
+                # Split the features
+                hist = features[..., :self.hist_bins]                    # (H, W, 3, bins)
+                mean = features[..., self.hist_bins:self.hist_bins+1]    # (H, W, 3, 1)
+                var = features[..., self.hist_bins+1:self.hist_bins+2]   # (H, W, 3, 1)
+
+                # Normalize histogram
+                hist /= (np.sum(hist, axis=-1, keepdims=True) + 1e-8)
+
+                # Log1p-transform mean and variance
+                mean = np.log1p(mean)
+                var = np.log1p(var)
+
+                # Re-concatenate
+                features = np.concatenate([hist, mean, var], axis=-1)
+
             else:
-                # Compute from full spp1_img, not subset
-                full_hist, _ = generate_histograms(spp1_img, self.hist_bins)
-                full_mean = spp1_img.mean(axis=0)[..., None]
-                full_var = spp1_img.var(axis=0)[..., None]
+                # Compute histogram on input samples
+                full_hist, _ = generate_histograms(input_samples, self.hist_bins)
+
+                # Normalize histogram
+                full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
+
+                # Log1p transform mean and variance
+                full_mean = np.log1p(input_samples.mean(axis=0))[..., None]
+                full_var = np.log1p(input_samples.var(axis=0))[..., None]
+
                 features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
                 np.savez_compressed(cache_path, features=features)
                 print(f"[CACHE] Created {cache_path}")
@@ -121,7 +144,11 @@ class HistogramBinomDataset(Dataset):
         else:
             input_avg = input_samples.mean(axis=0)  # (H, W, 3)
             input_tensor = torch.from_numpy(input_avg).permute(2, 0, 1).float()  # (3, H, W)
-
+            
+            # NORMALISE avg image
+            input_avg = np.log1p(input_avg)
+        
+        target_sample = np.log1p(target_sample)
         target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()  # (3, H, W)
 
         # RANDOM CROP
