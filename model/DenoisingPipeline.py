@@ -16,6 +16,9 @@ from datetime import datetime
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
 
+# Plots
+import matplotlib.pyplot as plt
+from skimage.metrics import peak_signal_noise_ratio as psnr
 
 # GPU Check
 if not torch.cuda.is_available():
@@ -172,57 +175,114 @@ def train_model(config):
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")
 
+def load_model(model_path, mode, out_mode='mean', hist_bins=16, device='cpu'):
+    model = UNet(
+        in_channels=3,
+        n_bins=hist_bins,
+        out_mode=out_mode,
+        merge_mode='concat',
+        depth=3,
+        start_filters=64,
+        mode=mode
+    ).to(device)
+    
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    return model
 
-def evaluate_model(config, checkpoint_path=None):
+
+def get_sample(dataset, idx=0, device='cpu'):
+    sample = dataset[idx]
+    input_tensor = sample['input'].unsqueeze(0).to(device)   # Add batch dimension
+    target = sample['target'].to(device)
+    noisy = sample['noisy'].to(device)
+    clean = sample.get('clean', None)
+    if clean is not None:
+        clean = clean.to(device)
+    return input_tensor, target, noisy, clean
+
+
+def evaluate_sample(model, input_tensor, target_tensor):
+    with torch.no_grad():
+        pred = model(input_tensor).squeeze(0).clamp(0, 1)
+        target = target_tensor.clamp(0, 1)
+
+        if pred.dim() == 3:
+            pred = pred.unsqueeze(0)
+        if target.dim() == 3:
+            target = target.unsqueeze(0)
+
+        print("Target shape:     ", target.shape)
+        print("Pred shape:  ", pred.shape)
+        psnr_val = psnr(target.cpu().numpy(), pred.cpu().numpy(), data_range=1.0)
+    return pred, psnr_val
+
+
+def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
+    def to_img(t): return t.detach().cpu().numpy().transpose(1, 2, 0)
+    
+    fig, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
+    axes[0].imshow(to_img(noisy));       axes[0].set_title("Noisy Input")
+    axes[1].imshow(to_img(hist_pred));   axes[1].set_title("Hist2Noise Output")
+    axes[2].imshow(to_img(noise_pred));  axes[2].set_title("Noise2Noise Output")
+    axes[3].imshow(to_img(target));      axes[3].set_title("Target Sample")
+    if clean is not None:
+        axes[4].imshow(to_img(clean));   axes[4].set_title("Clean (GT)")
+    for ax in axes: ax.axis('off')
+    plt.tight_layout(); plt.show()
+
+
+def evaluate_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Evaluating on device: {device}")
 
-    # Load data
-    _, val_loader = get_data_loaders(config)
+    idx = 0  # Sample index to visualize
 
-    dataset_cfg = config['dataset']
-    model_cfg = config['model']
+    # --- Dataset config ---
+    dataset_cfg = {
+        "root_dir": "output",
+        "cached_dir": "histograms",
+        "crop_size": 256,
+        "low_spp": 32,
+        "high_spp": 4500,
+        "hist_bins": 16,
+        "mode": "hist",  # will override below
+        "data_augmentation": False,
+        "virt_size": 100,
+        "clean": True,
+        "debug": False
+    }
 
-    # Load model
-    model = UNet(
-        in_channels=model_cfg['in_channels'],
-        n_bins=dataset_cfg['hist_bins'],
-        out_mode=model_cfg['out_mode'],
-        merge_mode=model_cfg['merge_mode'],
-        depth=model_cfg['depth'],
-        start_filters=model_cfg['start_filters'],
-        mode=dataset_cfg['mode']
-    ).to(device)
+    # === DataLoaders with shuffle=False ===
+    hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
+    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
 
-    # Load weights
-    if checkpoint_path is None:
-        # Default naming convention
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        model_type = "hist2noise" if dataset_cfg["mode"] == "hist" else "noise2noise"
-        out_mode = model_cfg["out_mode"]
-        bins = dataset_cfg["hist_bins"] if dataset_cfg["mode"] == "hist" else "img"
-        filename = f"{date_str}_{model_type}_{out_mode}_bins{bins}.pth"
-        checkpoint_path = os.path.join(config.get("save_dir", "checkpoints"), filename)
+    hist_loader = DataLoader(hist_dataset, batch_size=1, shuffle=False)
+    img_loader = DataLoader(img_dataset, batch_size=1, shuffle=False)
 
-    assert os.path.exists(checkpoint_path), f"Checkpoint not found at {checkpoint_path}"
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-    model.eval()
+    # Get the same sample from both
+    hist_sample = list(hist_loader)[idx]
+    img_sample = list(img_loader)[idx]
 
-    # Criterion
-    criterion = nn.MSELoss()
-    total_loss = 0
+    # --- Move to device ---
+    hist_input = hist_sample["input"].to(device)
+    img_input = img_sample["input"].to(device)
+    target     = hist_sample["target"].to(device)
+    noisy      = hist_sample["noisy"].to(device)
+    clean      = hist_sample["clean"].to(device) if "clean" in hist_sample else None
+    scene_name = hist_sample["scene"][0]
 
-    print(f"Loaded model from {checkpoint_path}")
-    print("Evaluating...")
+    # --- Load models ---
+    hist_model = load_model("checkpoints/2025-07-15_hist2noise_mean_bins16.pth", mode="hist", device=device)
+    img_model = load_model("checkpoints/2025-07-15_noise2noise_mean_binsimg.pth", mode="img", device=device)
 
-    with torch.no_grad():
-        for batch in val_loader:
-            inputs = batch['input'].to(device)
-            targets = batch['target'].to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            total_loss += loss.item()
+    # --- Predict ---
+    hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, target)
+    img_pred, img_psnr = evaluate_sample(img_model, img_input, target)
 
-    avg_loss = total_loss / len(val_loader)
-    print(f"\n Evaluation Complete - Average MSE Loss: {avg_loss:.4f}")
-    return avg_loss
+    print(f"\nScene: {scene_name}")
+    print(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
+    print(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
+
+    # --- Plot results ---
+    plot_images(noisy, hist_pred, img_pred, target, clean=clean)

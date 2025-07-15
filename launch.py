@@ -33,10 +33,10 @@ def main():
         from model.DenoisingPipeline import train_model
         train_model(config)
     
-    # TODO: EVAL
+    # EVAL (OK) <3
     elif task == "eval":
         from model.DenoisingPipeline import evaluate_model
-        evaluate_model(config)
+        evaluate_model()
 
 if __name__ == "__main__":
     main()
