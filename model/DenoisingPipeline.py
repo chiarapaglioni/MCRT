@@ -171,3 +171,58 @@ def train_model(config):
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")
+
+
+def evaluate_model(config, checkpoint_path=None):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Evaluating on device: {device}")
+
+    # Load data
+    _, val_loader = get_data_loaders(config)
+
+    dataset_cfg = config['dataset']
+    model_cfg = config['model']
+
+    # Load model
+    model = UNet(
+        in_channels=model_cfg['in_channels'],
+        n_bins=dataset_cfg['hist_bins'],
+        out_mode=model_cfg['out_mode'],
+        merge_mode=model_cfg['merge_mode'],
+        depth=model_cfg['depth'],
+        start_filters=model_cfg['start_filters'],
+        mode=dataset_cfg['mode']
+    ).to(device)
+
+    # Load weights
+    if checkpoint_path is None:
+        # Default naming convention
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        model_type = "hist2noise" if dataset_cfg["mode"] == "hist" else "noise2noise"
+        out_mode = model_cfg["out_mode"]
+        bins = dataset_cfg["hist_bins"] if dataset_cfg["mode"] == "hist" else "img"
+        filename = f"{date_str}_{model_type}_{out_mode}_bins{bins}.pth"
+        checkpoint_path = os.path.join(config.get("save_dir", "checkpoints"), filename)
+
+    assert os.path.exists(checkpoint_path), f"Checkpoint not found at {checkpoint_path}"
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.eval()
+
+    # Criterion
+    criterion = nn.MSELoss()
+    total_loss = 0
+
+    print(f"Loaded model from {checkpoint_path}")
+    print("Evaluating...")
+
+    with torch.no_grad():
+        for batch in val_loader:
+            inputs = batch['input'].to(device)
+            targets = batch['target'].to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            total_loss += loss.item()
+
+    avg_loss = total_loss / len(val_loader)
+    print(f"\n Evaluation Complete - Average MSE Loss: {avg_loss:.4f}")
+    return avg_loss
