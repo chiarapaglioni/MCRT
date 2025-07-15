@@ -8,6 +8,10 @@ from torch.utils.data import DataLoader, random_split
 import os
 from pathlib import Path
 
+# Time
+import time
+from datetime import datetime
+
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
@@ -137,18 +141,33 @@ def train_model(config):
     criterion = nn.MSELoss()
 
     best_val_loss = float('inf')
-    num_epochs = config["num_epochs"]
-    save_path = config["save_path"]
+    
+    # Model Name
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    model_type = "hist2noise" if dataset_cfg["mode"] == "hist" else "noise2noise"
+    out_mode = model_cfg["out_mode"]
+    bins = dataset_cfg["hist_bins"] if dataset_cfg["mode"] == "hist" else "img"
+    filename = f"{date_str}_{model_type}_{out_mode}_bins{bins}.pth"
 
+    save_dir = config.get("save_dir", "checkpoints")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, filename)
+
+    best_val_loss = float('inf')
     print("TRAINING STARTED !")
-    for epoch in range(num_epochs):
+
+    for epoch in range(config["num_epochs"]):
+        start_time = time.time()
+
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
         val_loss = validate_epoch(model, val_loader, criterion, device)
 
-        print(f"[Epoch {epoch+1}/{num_epochs}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        epoch_time = time.time() - start_time
+        print(f"[Epoch {epoch+1}/{config['num_epochs']}] "
+              f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} "
+              f"| Time: {epoch_time:.2f}s")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")
