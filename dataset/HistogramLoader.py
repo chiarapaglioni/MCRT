@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from dataset.HistImgDataset import HistogramBinomDataset
 
+# Logger
+import logging
+logger = logging.getLogger(__name__)
+
 def test_data_loader(config):
     # Dataset configuration
     dataset_cfg = config['dataset']
@@ -18,18 +22,18 @@ def test_data_loader(config):
 
     # Iterate over a few batches
     for batch in dataloader:
-        print("Keys:", batch.keys())
-        print("Input shape:", batch['input'].shape)     # (B, 3, B, H, W) in 'hist' mode
-        print("Target shape:", batch['target'].shape)   # same
-        print("Noisy shape:", batch['noisy'].shape)     # (B, 3, H, W)
+        logger.info(f"Keys: {batch.keys()}")
+        logger.info(f"Input shape: {batch['input'].shape}")     # (B, 3, B, H, W) in 'hist' mode
+        logger.info(f"Target shape: {batch['target'].shape}")   # same
+        logger.info(f"Noisy shape: {batch['noisy'].shape}")     # (B, 3, H, W)
         if 'clean' in batch:
-            print("Clean shape:", batch['clean'].shape) # (B, 3, H, W)
-        print("Scene:", batch['scene'])
+            logger.info(f"Clean shape: {batch['clean'].shape}") # (B, 3, H, W)
+        logger.info(f"Scene: {batch['scene']}")
 
         # Optional: visualize histograms
         if dataset.mode == 'hist':
             input_hist = batch['input'][0]  # shape: (3, bins+2, H, W)
-            print("Histogram shape (C, B+2, H, W):", input_hist.shape)
+            logger.info(f"Histogram shape (C, B+2, H, W): {input_hist.shape}")
 
             input_hist_np = input_hist.numpy()
 
@@ -51,11 +55,11 @@ def test_data_loader(config):
             g_var = input_hist_np[1, num_bins + 1, y, x]
             b_var = input_hist_np[2, num_bins + 1, y, x]
 
-            # Print
-            print(f"Pixel ({x},{y}):")
-            print(f"  Red   - bins: {r_hist}, mean: {r_mean:.4f}, var: {r_var:.4f}")
-            print(f"  Green - bins: {g_hist}, mean: {g_mean:.4f}, var: {g_var:.4f}")
-            print(f"  Blue  - bins: {b_hist}, mean: {b_mean:.4f}, var: {b_var:.4f}")
+            # logger.info
+            logger.info(f"Pixel ({x},{y}):")
+            logger.info(f"  Red   - bins: {r_hist}, mean: {r_mean:.4f}, var: {r_var:.4f}")
+            logger.info(f"  Green - bins: {g_hist}, mean: {g_mean:.4f}, var: {g_var:.4f}")
+            logger.info(f"  Blue  - bins: {b_hist}, mean: {b_mean:.4f}, var: {b_var:.4f}")
 
             # Plot
             bins = range(num_bins)

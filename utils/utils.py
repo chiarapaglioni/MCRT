@@ -1,7 +1,12 @@
 import os
+import logging
 import tifffile
 import numpy as np
 import matplotlib.pyplot as plt
+
+# Logger
+import logging
+logger = logging.getLogger(__name__)
 
 
 def save_tiff(data, file_name):
@@ -13,7 +18,7 @@ def save_tiff(data, file_name):
     - file_name (str): file name / scene name
     """
     tifffile.imwrite(file_name, data, compression='lzw', bigtiff=True)
-    print(f"Saved {file_name} with shape {data.shape} <3")
+    logger.info(f"Saved {file_name} with shape {data.shape} <3")
 
 
 def plot_images(noisy, hist_pred, noise_pred, target, clean=None, save_path=None):
@@ -45,7 +50,7 @@ def plot_images(noisy, hist_pred, noise_pred, target, clean=None, save_path=None
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight')
-        print(f"Plot saved to {save_path}")
+        logger.info(f"Plot saved to {save_path}")
 
     plt.show()
 
@@ -102,9 +107,23 @@ def save_loss_plot(train_losses, val_losses, save_dir, filename="loss_plot.png",
     plt.ylabel('Loss')
     plt.title(title)
     plt.legend()
-    plt.grid(True)
 
     save_path = os.path.join(save_dir, filename)
     plt.savefig(save_path)
     plt.close()
-    print(f"Loss plot saved to {save_path}")
+    logger.info(f"Loss plot saved to {save_path}")
+
+
+def setup_logger(logfile='run.log'):
+    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(os.path.join(log_dir, logfile)),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger()

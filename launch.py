@@ -1,6 +1,9 @@
-import argparse
 import yaml
+import argparse
 from pathlib import Path
+from utils.utils import setup_logger
+
+logger = setup_logger()
 
 def load_config(path):
     with open(path, 'r') as f:
@@ -13,6 +16,8 @@ def main():
                         help="Task to run.")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     args = parser.parse_args()
+
+    logger.info("MCRT DENOISING :)")
 
     task = args.task
     config_path = Path(args.config) if args.config else Path(f"config/{task}.yml")

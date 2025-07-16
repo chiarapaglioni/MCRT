@@ -2,6 +2,10 @@
 import torch
 import numpy as np
 
+# Logger
+import logging
+logger = logging.getLogger(__name__)
+
 def estimate_range(samples, debug=False):
     """
     Estimate binning range using 1st and 99th percentiles.
@@ -23,7 +27,7 @@ def estimate_range(samples, debug=False):
         max_val *= 1.1
 
     if debug:
-        print(f"Linear estimated radiance range: [{min_val:.4e}, {max_val:.4e}]")
+        logger.info(f"Linear estimated radiance range: [{min_val:.4e}, {max_val:.4e}]")
     return min_val, max_val
 
 

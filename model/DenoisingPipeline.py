@@ -16,10 +16,13 @@ from utils.utils import plot_images, save_loss_plot
 # Eval
 from skimage.metrics import peak_signal_noise_ratio as psnr
 
+# Logger
+import logging
+logger = logging.getLogger(__name__)
 
 # GPU Check
 if not torch.cuda.is_available():
-    print("GPU not found, code will run on CPU and can be extremely slow!")
+    logger.warning("GPU not found, code will run on CPU and can be extremely slow!")
 else:
     device = torch.device("cuda:0")
 
@@ -41,8 +44,8 @@ def get_data_loaders(config):
     # Split dataset
     train_dataset, val_dataset = random_split(full_dataset, [train_len, val_len])
 
-    print(f"Train dataset size: {len(train_dataset)}")
-    print(f"Val dataset size: {len(val_dataset)}")
+    logger.info(f"Train dataset size: {len(train_dataset)}")
+    logger.info(f"Val dataset size: {len(val_dataset)}")
 
     # Create DataLoaders with differing shuffle flags
     train_loader = DataLoader(
@@ -65,11 +68,11 @@ def get_data_loaders(config):
 
     train_img = next(iter(train_loader))
 
-    print("Input shape:", train_img['input'].shape)
-    print("Target shape:", train_img['target'].shape)
-    print("Noisy shape:", train_img['noisy'].shape)
+    logger.info(f"Input shape: {train_img['input'].shape}")
+    logger.info(f"Target shape: {train_img['target'].shape}")
+    logger.info(f"Noisy shape: {train_img['noisy'].shape}")
     if 'clean' in train_img:
-        print("Clean shape:", train_img['clean'].shape)
+        logger.info(f"Clean shape: {train_img['clean'].shape}")
 
     return train_loader, val_loader
 
@@ -112,8 +115,8 @@ def evaluate_sample(model, input_tensor, clean_tensor):
         if clean.dim() == 3:
             clean = clean.unsqueeze(0)
 
-        print("Target shape:     ", clean.shape)
-        print("Pred shape:  ", pred.shape)
+        logger.info(f"Target shape: {clean.shape}")
+        logger.info(f"Pred shape:  {pred.shape}")
         # Calculate PSNR
         psnr_val = psnr(clean.cpu().numpy(), pred.cpu().numpy(), data_range=1.0)
     return pred, psnr_val
@@ -160,7 +163,7 @@ def validate_epoch(model, dataloader, criterion, device):
 # TRAINING LOOP
 def train_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
     
     # Data Loaders
     train_loader, val_loader = get_data_loaders(config)
@@ -168,9 +171,9 @@ def train_model(config):
     dataset_cfg = config['dataset']
     model_cfg = config['model']
 
-    print(f"\nDataset Config: {config['dataset']['mode'].upper()} mode | Crop Size: {config['dataset']['crop_size']} | Augmentation: {config['dataset']['data_augmentation']}")
-    print(f"Model Config: Depth={config['model']['depth']} | Start Filters={config['model']['start_filters']} | Output: {config['model']['out_mode']}")
-    print(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
+    logger.info(f"\nDataset Config: {config['dataset']['mode'].upper()} mode | Crop Size: {config['dataset']['crop_size']} | Augmentation: {config['dataset']['data_augmentation']}")
+    logger.info(f"Model Config: Depth={config['model']['depth']} | Start Filters={config['model']['start_filters']} | Output: {config['model']['out_mode']}")
+    logger.info(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
 
     # Model
     model = UNet(
@@ -200,7 +203,7 @@ def train_model(config):
     save_path = os.path.join(save_dir, filename)
 
     best_val_loss = float('inf')
-    print("TRAINING STARTED !")
+    logger.info("TRAINING STARTED !")
 
     # store loss values for plot
     train_losses = []
@@ -216,14 +219,14 @@ def train_model(config):
         val_losses.append(val_loss)
 
         epoch_time = time.time() - start_time
-        print(f"[Epoch {epoch+1}/{config['num_epochs']}] "
+        logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] "
               f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} "
               f"| Time: {epoch_time:.2f}s")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
-            print(f"Saved best model to {save_path}")
+            logger.info(f"Saved best model to {save_path}")
         
     # save plot loss
     save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_loss_plot.png")
@@ -232,7 +235,7 @@ def train_model(config):
 
 def evaluate_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Evaluating on device: {device}")
+    logger.info(f"Evaluating on device: {device}")
 
     # Read evaluation parameters from config
     idx = config["eval"]["idx"]
@@ -269,10 +272,10 @@ def evaluate_model(config):
     img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
     init_psnr = psnr(noisy.cpu().numpy(), clean.cpu().numpy(), data_range=1.0)
 
-    print(f"\nScene: {scene}")
-    print(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
-    print(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
-    print(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
+    logger.info(f"\nScene: {scene}")
+    logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
+    logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
+    logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
     # Plot results
     plot_images(noisy, hist_pred, img_pred, target, clean=clean, save_path=f'plots/denoised_{idx}.png')

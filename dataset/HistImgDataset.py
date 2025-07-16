@@ -8,6 +8,10 @@ from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
 from utils.utils import standardize_image
 
+# Logger
+import logging
+logger = logging.getLogger(__name__)
+
 
 class HistogramBinomDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
@@ -47,7 +51,7 @@ class HistogramBinomDataset(Dataset):
         self.scene_names = sorted(set(key for key, _ in scene_keys))
         assert self.scene_names, f"No scenes found in {self.root_dir}"
 
-        print(f"{len(self.scene_names)} scenes: ", self.scene_names)
+        logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
             os.makedirs(self.cached_dir)
