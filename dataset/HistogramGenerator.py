@@ -1,4 +1,5 @@
 
+import torch
 import numpy as np
 
 def estimate_range(samples, debug=False):
@@ -25,6 +26,7 @@ def estimate_range(samples, debug=False):
         print(f"Linear estimated radiance range: [{min_val:.4e}, {max_val:.4e}]")
     return min_val, max_val
 
+
 def accumulate_histogram(hist, samples, bin_edges, num_bins):
     """
     Vectorized histogram accumulation.
@@ -42,12 +44,95 @@ def accumulate_histogram(hist, samples, bin_edges, num_bins):
             bincounts[:, :, b] = (bins[:, :, :, c] == b).sum(axis=0)
         hist[:, :, c, :] = bincounts  # replace not add to avoid accumulation
 
+
+def accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins):
+    """
+    Vectorized histogram accumulation without explicit loops.
+
+    Paramters:
+        hist (np.ndarray): (H, W, 3, B) zero-initialized histogram to fill.
+        samples (np.ndarray): (N, H, W, 3) samples.
+        bin_edges (np.ndarray): (B+1,) bin edges.
+        num_bins (int): number of bins.
+    """
+    # samples: (N, H, W, 3)
+    # Transpose samples to (H, W, 3, N) for easier manipulation
+    samples_t = np.transpose(samples, (1, 2, 3, 0))
+    
+    # Digitize samples to bin indices (shape: H, W, 3, N)
+    bins = np.digitize(samples_t, bin_edges) - 1
+    bins = np.clip(bins, 0, num_bins - 1)
+    
+    H, W, C, N = bins.shape
+    
+    for c in range(C):
+        # Flatten spatial dims and N: shape (H*W, N)
+        flat_bins = bins[:, :, c, :].reshape(-1, N)
+        # Count occurrences of each bin along axis 1
+        bincounts = np.apply_along_axis(lambda x: np.bincount(x, minlength=num_bins), axis=1, arr=flat_bins)
+        # Reshape back to (H, W, B)
+        hist[:, :, c, :] = bincounts.reshape(H, W, num_bins)
+
+
+def accumulate_histogram_torch(samples, bin_edges, num_bins, device='cuda'):
+    """
+    samples: Tensor shape (N, H, W, 3), float32
+    Returns: hist Tensor (H, W, 3, num_bins)
+    """
+    samples = samples.to(device)  # Ensure on GPU
+    bin_edges = torch.tensor(bin_edges, device=device)
+
+    N, H, W, C = samples.shape
+    hist = torch.zeros((H, W, C, num_bins), device=device, dtype=torch.int32)
+
+    # Digitize samples: find bins for each sample
+    bins = torch.bucketize(samples, bin_edges) - 1
+    bins = torch.clamp(bins, 0, num_bins - 1)
+
+    for c in range(C):
+        # bins[:, :, :, c] shape (N, H, W)
+        # reshape to (N, H*W)
+        flat_bins = bins[:, :, :, c].reshape(N, -1)
+        # bincount for each spatial location across N samples
+        # accumulate histogram per pixel location
+        for idx in range(flat_bins.shape[1]):
+            hist.view(H*W, C, num_bins)[idx, c].index_add_(0, flat_bins[:, idx], torch.ones(N, device=device))
+
+    return hist
+
+
 def generate_histograms(samples, num_bins, debug=False):
+    """
+    Generate histograms per pixel per channel from input samples.
+    Uses GPU acceleration via PyTorch if CUDA is available.
+    
+    Args:
+        samples (np.ndarray): Shape (N, H, W, 3), input radiance samples
+        num_bins (int): Number of histogram bins
+        debug (bool): Print debug info
+    
+    Returns:
+        hist (np.ndarray): Shape (H, W, 3, B), histogram per pixel per channel
+        bin_edges (np.ndarray): Shape (B+1,), bin edges
+    """
     _, H, W, _ = samples.shape
     min_val, max_val = estimate_range(samples, debug=debug)
-    bin_edges = np.linspace(min_val, max_val, num_bins + 1)  # +1 for edges
+    bin_edges = np.linspace(min_val, max_val, num_bins + 1)
 
-    hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
-    accumulate_histogram(hist, samples, bin_edges, num_bins)
+    if torch.cuda.is_available():
+        # Use PyTorch GPU implementation
+        device = torch.device("cuda")
+        torch_samples = torch.tensor(samples, dtype=torch.float32, device=device)  # (N, H, W, 3)
+        bin_edges_torch = torch.tensor(bin_edges, dtype=torch.float32, device=device)
+
+        with torch.no_grad():
+            hist = accumulate_histogram_torch(torch_samples, bin_edges_torch, num_bins, device=device)
+            hist = hist.cpu().numpy()  # Convert to NumPy for consistency
+
+    else:
+        # Use numpy implementation
+        hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
+        accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins)
 
     return hist, bin_edges
+
