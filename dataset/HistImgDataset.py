@@ -105,7 +105,9 @@ class HistogramBinomDataset(Dataset):
                 features = np.concatenate([hist, mean, var], axis=-1)
             else:
                 full_hist, _ = generate_histograms(input_samples, self.hist_bins)
+                full_hist = full_hist.astype(np.float32)
                 full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
+
                 full_mean = np.log1p(input_samples.mean(axis=0))[..., None]
                 full_var = np.log1p(input_samples.var(axis=0))[..., None]
                 features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
