@@ -1,4 +1,5 @@
 import tifffile
+import numpy as np
 import matplotlib.pyplot as plt
 
 def save_tiff(data, file_name):
@@ -29,7 +30,7 @@ def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
             t = t.squeeze(0)
         return t.detach().cpu().numpy().transpose(1, 2, 0)
     
-    fig, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
+    _, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
     axes[0].imshow(to_img(noisy));       axes[0].set_title("Noisy Input")
     axes[1].imshow(to_img(target));      axes[1].set_title("Target Sample")
     axes[2].imshow(to_img(hist_pred));   axes[2].set_title("Hist2Noise Output")
@@ -38,3 +39,35 @@ def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
         axes[4].imshow(to_img(clean));   axes[4].set_title("Clean (GT)")
     for ax in axes: ax.axis('off')
     plt.tight_layout(); plt.show()
+
+
+def standardize_image(img: np.ndarray, per_channel: bool = True, epsilon: float = 1e-8) -> np.ndarray:
+    """
+    Standardizes an image to have zero mean and unit variance.
+
+    Args:
+        img (np.ndarray): Input image with shape (H, W, C) or (C, H, W)
+        per_channel (bool): If True, normalize each channel independently. Otherwise, normalize globally.
+        epsilon (float): Small value to avoid division by zero.
+
+    Returns:
+        np.ndarray: Standardized image with same shape.
+    """
+    # Ensure shape is (H, W, C)
+    if img.ndim == 3 and img.shape[0] in [1, 3] and img.shape[0] < img.shape[-1]:
+        img = np.transpose(img, (1, 2, 0))  # (C, H, W) -> (H, W, C)
+
+    img = img.astype(np.float32)
+
+    if per_channel:
+        for c in range(img.shape[-1]):
+            channel = img[..., c]
+            mean = channel.mean()
+            std = channel.std()
+            img[..., c] = (channel - mean) / (std + epsilon)
+    else:
+        mean = img.mean()
+        std = img.std()
+        img = (img - mean) / (std + epsilon)
+
+    return img

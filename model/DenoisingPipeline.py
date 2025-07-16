@@ -187,8 +187,6 @@ def train_model(config):
     # TODO: add support for Cross Entropy for distribution
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]), weight_decay=float(model_cfg["weight_decay"]))
     criterion = nn.MSELoss()
-
-    best_val_loss = float('inf')
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")

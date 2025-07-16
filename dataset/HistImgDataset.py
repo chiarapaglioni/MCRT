@@ -1,12 +1,12 @@
 import os
 import torch
 import random
-import zipfile
 import tifffile
 import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
+from utils.utils import standardize_image
 
 
 class HistogramBinomDataset(Dataset):
@@ -51,7 +51,9 @@ class HistogramBinomDataset(Dataset):
         if self.cached_dir and not os.path.exists(self.cached_dir):
             os.makedirs(self.cached_dir)
 
+        # Load and Normalise Data
         for key, folder in scene_keys:
+            #  Get Images Paths
             spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
             noisy_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.low_spp}.tiff")), None)
             clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
@@ -61,17 +63,27 @@ class HistogramBinomDataset(Dataset):
             spp1_path = os.path.join(folder, spp1_file)
             noisy_path = os.path.join(folder, noisy_file)
 
+            spp1_img = tifffile.imread(spp1_path)  # (low_spp, H, W, 3)
+            noisy_img = tifffile.imread(noisy_path)  # (H, W, 3)
+
+            # Standardize/Normalise Images
+            spp1_img = standardize_image(spp1_img)
+            noisy_img = standardize_image(noisy_img)
+
             self.scene_paths[key] = folder
-            self.spp1_images[key] = tifffile.imread(spp1_path)  # (low_spp, H, W, 3)
-            self.noisy_images[key] = torch.from_numpy(tifffile.imread(noisy_path)).permute(2, 0, 1).float()  # (3, H, W)
+            self.spp1_images[key] = spp1_img
+            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()
 
             if self.clean and clean_file:
                 clean_path = os.path.join(folder, clean_file)
-                self.clean_images[key] = torch.from_numpy(tifffile.imread(clean_path)).permute(2, 0, 1).float()
+                clean_img = tifffile.imread(clean_path)
+                clean_img = standardize_image(clean_img)
+                self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()
 
 
     def __len__(self):
         return self.virt_size
+
 
     def __getitem__(self, idx, seed=None, crop_coords=None):
         if seed is not None:
@@ -93,33 +105,19 @@ class HistogramBinomDataset(Dataset):
 
         # HIST MODE
         if self.mode == 'hist':
-            if self.cached_dir is None:
-                raise RuntimeError("Histogram mode requires 'cached_dir'.")
+            full_hist, _ = generate_histograms(input_samples, self.hist_bins)
+            full_hist = full_hist.astype(np.float32)
+            full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
 
-            cache_path = os.path.join(self.cached_dir, f"{scene}_hist.npz")
+            full_mean = input_samples.mean(axis=0)[..., None]
+            full_var = input_samples.var(axis=0)[..., None]
 
-            if os.path.exists(cache_path):
-                try:
-                    with np.load(cache_path) as data:
-                        features = data['features']
-                except (zipfile.BadZipFile, KeyError, ValueError, OSError) as e:
-                    print(f"Skipping corrupted file: {cache_path}\nError: {e}")
-                    return self.__getitem__((idx + 1) % len(self))
-            else:
-                full_hist, _ = generate_histograms(input_samples, self.hist_bins)
-                full_hist = full_hist.astype(np.float32)
-                full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
+            features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
 
-                full_mean = np.log1p(input_samples.mean(axis=0))[..., None]
-                full_var = np.log1p(input_samples.var(axis=0))[..., None]
-
-                features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
-                np.savez_compressed(cache_path, features=features)
-
-            # Normalize + log features
+            # Normalize Histiogram
             hist = features[..., :self.hist_bins]
-            mean = np.log1p(features[..., self.hist_bins:self.hist_bins+1])
-            var = np.log1p(features[..., self.hist_bins+1:self.hist_bins+2])
+            mean = features[..., self.hist_bins:self.hist_bins+1]
+            var = features[..., self.hist_bins+1:self.hist_bins+2]
             hist /= (np.sum(hist, axis=-1, keepdims=True) + 1e-8)
             features = np.concatenate([hist, mean, var], axis=-1)
 
@@ -128,10 +126,9 @@ class HistogramBinomDataset(Dataset):
         # IMG MODE
         else:
             input_avg = input_samples.mean(axis=0)
-            input_tensor = torch.from_numpy(np.log1p(input_avg)).permute(2, 0, 1).float()
+            input_tensor = torch.from_numpy(input_avg).permute(2, 0, 1).float()
 
         # Target
-        target_sample = np.log1p(target_sample)
         target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()
 
         # CROP
