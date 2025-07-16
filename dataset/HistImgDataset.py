@@ -96,13 +96,9 @@ class HistogramBinomDataset(Dataset):
                 raise RuntimeError("Histogram mode requires 'cached_dir'.")
 
             cache_path = os.path.join(self.cached_dir, f"{scene}_hist.npz")
+
             if os.path.exists(cache_path):
                 features = np.load(cache_path)['features']
-                hist = features[..., :self.hist_bins]
-                mean = np.log1p(features[..., self.hist_bins:self.hist_bins+1])
-                var = np.log1p(features[..., self.hist_bins+1:self.hist_bins+2])
-                hist /= (np.sum(hist, axis=-1, keepdims=True) + 1e-8)
-                features = np.concatenate([hist, mean, var], axis=-1)
             else:
                 full_hist, _ = generate_histograms(input_samples, self.hist_bins)
                 full_hist = full_hist.astype(np.float32)
@@ -110,12 +106,21 @@ class HistogramBinomDataset(Dataset):
 
                 full_mean = np.log1p(input_samples.mean(axis=0))[..., None]
                 full_var = np.log1p(input_samples.var(axis=0))[..., None]
+
                 features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
                 np.savez_compressed(cache_path, features=features)
 
+            # Normalize + log features
+            hist = features[..., :self.hist_bins]
+            mean = np.log1p(features[..., self.hist_bins:self.hist_bins+1])
+            var = np.log1p(features[..., self.hist_bins+1:self.hist_bins+2])
+            hist /= (np.sum(hist, axis=-1, keepdims=True) + 1e-8)
+            features = np.concatenate([hist, mean, var], axis=-1)
+
             input_tensor = torch.from_numpy(np.transpose(features, (2, 3, 0, 1))).float()
 
-        else:  # 'img' mode
+        # IMG MODE
+        else:
             input_avg = input_samples.mean(axis=0)
             input_tensor = torch.from_numpy(np.log1p(input_avg)).permute(2, 0, 1).float()
 
