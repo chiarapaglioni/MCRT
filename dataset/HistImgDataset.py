@@ -1,6 +1,7 @@
 import os
 import torch
 import random
+import zipfile
 import tifffile
 import numpy as np
 from torchvision import transforms
@@ -98,7 +99,12 @@ class HistogramBinomDataset(Dataset):
             cache_path = os.path.join(self.cached_dir, f"{scene}_hist.npz")
 
             if os.path.exists(cache_path):
-                features = np.load(cache_path)['features']
+                try:
+                    with np.load(cache_path) as data:
+                        features = data['features']
+                except (zipfile.BadZipFile, KeyError, ValueError, OSError) as e:
+                    print(f"Skipping corrupted file: {cache_path}\nError: {e}")
+                    return self.__getitem__((idx + 1) % len(self))
             else:
                 full_hist, _ = generate_histograms(input_samples, self.hist_bins)
                 full_hist = full_hist.astype(np.float32)
