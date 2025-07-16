@@ -4,8 +4,11 @@ import torch.nn.functional as F
 
 # CONVOLUTION
 def conv3x3(in_channels, out_channels, stride=1, padding=1, bias=True):
+    # 2D Convolution using a 3x3 kernel
     return nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=padding, bias=bias)
 
+
+# DOWN PATH
 class DownConv(nn.Module):
     """
     Residual Down Convolution Block with optional max pooling.
@@ -29,6 +32,8 @@ class DownConv(nn.Module):
             x = self.pool(x)
         return x, before_pool
     
+
+# UP PATH
 class UpConv(nn.Module):
     """
     Residual Up Convolution Block.

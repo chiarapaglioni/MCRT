@@ -50,7 +50,7 @@ def get_data_loaders(config):
         batch_size=config['batch_size'],
         shuffle=True,
         num_workers=config['num_workers'],
-        pin_memory=False,
+        pin_memory=config['pin_memory'],
         drop_last=True
     )
 
@@ -59,7 +59,7 @@ def get_data_loaders(config):
         batch_size=config['batch_size'],
         shuffle=False,
         num_workers=config['num_workers'],
-        pin_memory=False,
+        pin_memory=config['pin_memory'],
         drop_last=False
     )
 
