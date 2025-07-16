@@ -178,12 +178,15 @@ cython_debug/
 /checkpoints_3d
 /notebooks
 /.vscode
+/data
+/files
 
 # data files
 *.exr
-*.json
 *.xml
 *.png
 *.npy
 *.obj
 *.ply
+*.npz
+*.tiff
