@@ -12,7 +12,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images
+from utils.utils import plot_images, save_loss_plot
 # Eval
 from skimage.metrics import peak_signal_noise_ratio as psnr
 
@@ -202,11 +202,18 @@ def train_model(config):
     best_val_loss = float('inf')
     print("TRAINING STARTED !")
 
+    # store loss values for plot
+    train_losses = []
+    val_losses = []
+
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
         val_loss = validate_epoch(model, val_loader, criterion, device)
+
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
 
         epoch_time = time.time() - start_time
         print(f"[Epoch {epoch+1}/{config['num_epochs']}] "
@@ -217,6 +224,10 @@ def train_model(config):
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")
+        
+    # save plot loss
+    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_loss_plot.png")
+
 
 
 def evaluate_model(config):

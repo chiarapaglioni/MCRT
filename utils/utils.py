@@ -1,6 +1,8 @@
+import os
 import tifffile
 import numpy as np
 import matplotlib.pyplot as plt
+
 
 def save_tiff(data, file_name):
     """
@@ -71,3 +73,30 @@ def standardize_image(img: np.ndarray, per_channel: bool = True, epsilon: float 
         img = (img - mean) / (std + epsilon)
 
     return img
+
+
+def save_loss_plot(train_losses, val_losses, save_dir, filename="loss_plot.png", title="Training and Validation Loss"):
+    """
+    Plots and saves training and validation loss curves.
+
+    Args:
+        train_losses (list or array): List of training loss values per epoch.
+        val_losses (list or array): List of validation loss values per epoch.
+        save_dir (str or Path): Directory to save the plot.
+        filename (str): Filename for the saved plot image.
+        title (str): Title of the plot.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    plt.figure(figsize=(8, 6))
+    plt.plot(range(1, len(train_losses) + 1), train_losses, label='Train Loss')
+    plt.plot(range(1, len(val_losses) + 1), val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+
+    save_path = os.path.join(save_dir, filename)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Loss plot saved to {save_path}")
