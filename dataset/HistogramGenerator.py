@@ -101,7 +101,7 @@ def accumulate_histogram_torch(samples, bin_edges, num_bins, device='cuda'):
     return hist
 
 
-def generate_histograms(samples, num_bins, debug=False):
+def generate_histograms(samples, num_bins, device=None, debug=False):
     """
     Generate histograms per pixel per channel from input samples.
     Uses GPU acceleration via PyTorch if CUDA is available.
@@ -119,20 +119,14 @@ def generate_histograms(samples, num_bins, debug=False):
     min_val, max_val = estimate_range(samples, debug=debug)
     bin_edges = np.linspace(min_val, max_val, num_bins + 1)
 
-    if torch.cuda.is_available():
-        # Use PyTorch GPU implementation
-        device = torch.device("cuda")
-        torch_samples = torch.tensor(samples, dtype=torch.float32, device=device)  # (N, H, W, 3)
-        bin_edges_torch = torch.tensor(bin_edges, dtype=torch.float32, device=device)
-
+    if device is not None and torch.cuda.is_available():
         with torch.no_grad():
-            hist = accumulate_histogram_torch(torch_samples, bin_edges_torch, num_bins, device=device)
-            hist = hist.cpu().numpy()  # Convert to NumPy for consistency
-
+            torch_samples = torch.tensor(samples, dtype=torch.float32, device=device)
+            bin_edges_torch = torch.tensor(bin_edges, dtype=torch.float32, device=device)
+            hist_torch = accumulate_histogram_torch(torch_samples, bin_edges_torch, num_bins, device=device)
+            hist = hist_torch.cpu().numpy()
     else:
-        # Use numpy implementation
         hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
         accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins)
 
     return hist, bin_edges
-

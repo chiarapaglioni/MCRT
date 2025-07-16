@@ -13,7 +13,7 @@ class HistogramBinomDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
                 data_augmentation: bool = True, virt_size: int = 1000,
                 low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
-                clean: bool = False, cached_dir: str = None, debug: bool = False):
+                clean: bool = False, cached_dir: str = None, debug: bool = False, device: str = None):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -25,6 +25,7 @@ class HistogramBinomDataset(Dataset):
         self.clean = clean
         self.cached_dir = cached_dir
         self.debug = debug
+        self.device = device or torch.device("cpu")
 
         self.spp1_images = {}
         self.noisy_images = {}
@@ -105,7 +106,7 @@ class HistogramBinomDataset(Dataset):
 
         # HIST MODE
         if self.mode == 'hist':
-            full_hist, _ = generate_histograms(input_samples, self.hist_bins)
+            full_hist, _ = generate_histograms(input_samples, self.hist_bins, self.device)
             full_hist = full_hist.astype(np.float32)
             full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
 
