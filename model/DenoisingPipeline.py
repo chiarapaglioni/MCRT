@@ -3,22 +3,19 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
-
 # Path
 import os
 from pathlib import Path
-
 # Time
 import time
 from datetime import datetime
-
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-
-# Plots
-import matplotlib.pyplot as plt
+from utils.utils import plot_images
+# Eval
 from skimage.metrics import peak_signal_noise_ratio as psnr
+
 
 # GPU Check
 if not torch.cuda.is_available():
@@ -77,6 +74,52 @@ def get_data_loaders(config):
     return train_loader, val_loader
 
 
+def load_model(model_path, mode, out_mode='mean', hist_bins=16, device='cpu'):
+    model = UNet(
+        in_channels=3,
+        n_bins=hist_bins,
+        out_mode=out_mode,
+        merge_mode='concat',
+        depth=3,
+        start_filters=64,
+        mode=mode
+    ).to(device)
+    
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    return model
+
+
+def get_sample(dataset, idx=0, device='cpu'):
+    sample = dataset[idx]
+    input_tensor = sample['input'].unsqueeze(0).to(device)   # Add batch dimension
+    target = sample['target'].to(device)
+    noisy = sample['noisy'].to(device)
+    clean = sample.get('clean', None)
+    if clean is not None:
+        clean = clean.to(device)
+    return input_tensor, target, noisy, clean
+
+
+def evaluate_sample(model, input_tensor, clean_tensor):
+    with torch.no_grad():
+        pred = model(input_tensor).squeeze(0).clamp(0, 1)
+        clean = clean_tensor.clamp(0, 1)
+
+        # Fix dimensions
+        if pred.dim() == 3:
+            pred = pred.unsqueeze(0)
+        if clean.dim() == 3:
+            clean = clean.unsqueeze(0)
+
+        print("Target shape:     ", clean.shape)
+        print("Pred shape:  ", pred.shape)
+        # Calculate PSNR
+        psnr_val = psnr(clean.cpu().numpy(), pred.cpu().numpy(), data_range=1.0)
+    return pred, psnr_val
+
+
+# TRAINING STEP
 def train_epoch(model, dataloader, optimizer, criterion, device):
     model.train()
     total_loss = 0
@@ -87,10 +130,6 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
 
         optimizer.zero_grad()
         pred = model(hist)                      # 3, H, W
-        
-        # print("Input shape: ", hist.shape)
-        # print("Target shape: ", target.shape)
-        # print("Pred shape: ", target.shape)
 
         loss = criterion(pred, target)
         loss.backward()
@@ -101,6 +140,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
     return total_loss / len(dataloader)
 
 
+# VALIDATION STEP
 def validate_epoch(model, dataloader, criterion, device):
     model.eval()
     total_loss = 0 
@@ -117,10 +157,12 @@ def validate_epoch(model, dataloader, criterion, device):
     return total_loss / len(dataloader)
 
 
+# TRAINING LOOP
 def train_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-
+    
+    # Data Loaders
     train_loader, val_loader = get_data_loaders(config)
 
     dataset_cfg = config['dataset']
@@ -130,6 +172,7 @@ def train_model(config):
     print(f"Model Config: Depth={config['model']['depth']} | Start Filters={config['model']['start_filters']} | Output: {config['model']['out_mode']}")
     print(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
 
+    # Model
     model = UNet(
         in_channels=model_cfg['in_channels'],
         n_bins=dataset_cfg['hist_bins'],
@@ -140,6 +183,8 @@ def train_model(config):
         mode=dataset_cfg['mode']
     ).to(device)
 
+    # Optimizer + Loss (MSE for Mean)
+    # TODO: add support for Cross Entropy for distribution
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]), weight_decay=float(model_cfg["weight_decay"]))
     criterion = nn.MSELoss()
 
@@ -174,65 +219,6 @@ def train_model(config):
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")
-
-def load_model(model_path, mode, out_mode='mean', hist_bins=16, device='cpu'):
-    model = UNet(
-        in_channels=3,
-        n_bins=hist_bins,
-        out_mode=out_mode,
-        merge_mode='concat',
-        depth=3,
-        start_filters=64,
-        mode=mode
-    ).to(device)
-    
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
-    return model
-
-
-def get_sample(dataset, idx=0, device='cpu'):
-    sample = dataset[idx]
-    input_tensor = sample['input'].unsqueeze(0).to(device)   # Add batch dimension
-    target = sample['target'].to(device)
-    noisy = sample['noisy'].to(device)
-    clean = sample.get('clean', None)
-    if clean is not None:
-        clean = clean.to(device)
-    return input_tensor, target, noisy, clean
-
-
-def evaluate_sample(model, input_tensor, target_tensor):
-    with torch.no_grad():
-        pred = model(input_tensor).squeeze(0).clamp(0, 1)
-        target = target_tensor.clamp(0, 1)
-
-        if pred.dim() == 3:
-            pred = pred.unsqueeze(0)
-        if target.dim() == 3:
-            target = target.unsqueeze(0)
-
-        print("Target shape:     ", target.shape)
-        print("Pred shape:  ", pred.shape)
-        psnr_val = psnr(target.cpu().numpy(), pred.cpu().numpy(), data_range=1.0)
-    return pred, psnr_val
-
-
-def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
-    def to_img(t):
-        if t.dim() == 4:  # [1, 3, H, W]
-            t = t.squeeze(0)
-        return t.detach().cpu().numpy().transpose(1, 2, 0)
-    
-    fig, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
-    axes[0].imshow(to_img(noisy));       axes[0].set_title("Noisy Input")
-    axes[1].imshow(to_img(hist_pred));   axes[1].set_title("Hist2Noise Output")
-    axes[2].imshow(to_img(noise_pred));  axes[2].set_title("Noise2Noise Output")
-    axes[3].imshow(to_img(target));      axes[3].set_title("Target Sample")
-    if clean is not None:
-        axes[4].imshow(to_img(clean));   axes[4].set_title("Clean (GT)")
-    for ax in axes: ax.axis('off')
-    plt.tight_layout(); plt.show()
 
 
 def evaluate_model(config):
@@ -270,8 +256,8 @@ def evaluate_model(config):
     img_model = load_model(config["eval"]["img_checkpoint"], mode="img", device=device)
 
     # Evaluate models
-    hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, target)
-    img_pred, img_psnr = evaluate_sample(img_model, img_input, target)
+    hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)
+    img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
 
     print(f"\nScene: {scene}")
     print(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
