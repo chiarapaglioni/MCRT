@@ -79,25 +79,28 @@ def accumulate_histogram_torch(samples, bin_edges, num_bins, device='cuda'):
     samples: Tensor shape (N, H, W, 3), float32
     Returns: hist Tensor (H, W, 3, num_bins)
     """
-    samples = samples.to(device)  # Ensure on GPU
-    bin_edges = torch.tensor(bin_edges, device=device)
+    samples = samples.to(device)
+
+    # Fix the bin_edges warning
+    if not isinstance(bin_edges, torch.Tensor):
+        bin_edges = torch.tensor(bin_edges, dtype=torch.float32, device=device)
+    else:
+        bin_edges = bin_edges.to(device=device, dtype=torch.float32)
 
     N, H, W, C = samples.shape
     hist = torch.zeros((H, W, C, num_bins), device=device, dtype=torch.int32)
 
-    # Digitize samples: find bins for each sample
     bins = torch.bucketize(samples, bin_edges) - 1
     bins = torch.clamp(bins, 0, num_bins - 1)
 
     for c in range(C):
-        # bins[:, :, :, c] shape (N, H, W)
-        # reshape to (N, H*W)
         flat_bins = bins[:, :, :, c].reshape(N, -1)
-        # bincount for each spatial location across N samples
-        # accumulate histogram per pixel location
         for idx in range(flat_bins.shape[1]):
-            hist.view(H*W, C, num_bins)[idx, c].index_add_(0, flat_bins[:, idx], torch.ones(N, device=device))
-
+            hist.view(H*W, C, num_bins)[idx, c].index_add_(
+                0,
+                flat_bins[:, idx],
+                torch.ones(N, device=device, dtype=torch.int32)
+            )
     return hist
 
 
