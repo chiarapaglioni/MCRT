@@ -16,7 +16,7 @@ def save_tiff(data, file_name):
     print(f"Saved {file_name} with shape {data.shape} <3")
 
 
-def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
+def plot_images(noisy, hist_pred, noise_pred, target, clean=None, save_path=None):
     """
     Plot denoised images generated from the noise2noise and hist2nosie next to the clean one.
 
@@ -40,7 +40,15 @@ def plot_images(noisy, hist_pred, noise_pred, target, clean=None):
     if clean is not None:
         axes[4].imshow(to_img(clean));   axes[4].set_title("Clean (GT)")
     for ax in axes: ax.axis('off')
-    plt.tight_layout(); plt.show()
+    plt.tight_layout()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, bbox_inches='tight')
+        print(f"Plot saved to {save_path}")
+
+    plt.show()
+
 
 
 def standardize_image(img: np.ndarray, per_channel: bool = True, epsilon: float = 1e-8) -> np.ndarray:

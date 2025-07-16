@@ -267,10 +267,12 @@ def evaluate_model(config):
     # Evaluate models
     hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)
     img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
+    init_psnr = psnr(noisy.cpu().numpy(), clean.cpu().numpy(), data_range=1.0)
 
     print(f"\nScene: {scene}")
+    print(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
     print(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
     print(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
     # Plot results
-    plot_images(noisy, hist_pred, img_pred, target, clean=clean)
+    plot_images(noisy, hist_pred, img_pred, target, clean=clean, save_path=f'plots/denoised_{idx}.png')
