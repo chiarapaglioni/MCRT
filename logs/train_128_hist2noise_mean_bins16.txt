@@ -1,0 +1,45 @@
+2025-07-17 11:26:04,169 - INFO - MCRT DENOISING :)
+2025-07-17 11:26:05,972 - INFO - Using device: cuda
+2025-07-17 11:26:05,972 - INFO - 27 scenes: ['banner_01_scene', 'banner_02_scene', 'bathroom2_scene', 'bathroom_scene', 'bedroom_scene', 'classroom_scene', 'cornell-box_scene', 'dining-room_scene', 'glass-of-water_scene', 'house_scene', 'house_scene-above', 'kitchen_scene', 'lamp_scene', 'lamp_scene-above', 'living-room-2_scene', 'living-room-3_scene', 'living-room_scene', 'matpreview_scene', 'matpreview_scene-above', 'spaceship_scene', 'staircase2_scene', 'staircase_scene', 'teapot-full_scene', 'veach-ajar_scene', 'veach-bidir_scene', 'veach-mis_scene', 'volumetric-caustic_scene']
+2025-07-17 11:26:16,826 - INFO - Train dataset size: 9000
+2025-07-17 11:26:16,826 - INFO - Val dataset size: 1000
+2025-07-17 11:26:21,709 - INFO - Input shape: torch.Size([32, 3, 18, 128, 128])
+2025-07-17 11:26:21,709 - INFO - Target shape: torch.Size([32, 3, 128, 128])
+2025-07-17 11:26:21,709 - INFO - Noisy shape: torch.Size([32, 3, 128, 128])
+2025-07-17 11:26:21,709 - INFO - Clean shape: torch.Size([32, 3, 128, 128])
+2025-07-17 11:26:21,709 - INFO - 
+Dataset Config: HIST mode | Crop Size: 128 | Augmentation: True
+2025-07-17 11:26:21,709 - INFO - Model Config: Depth=3 | Start Filters=32 | Output: mean
+2025-07-17 11:26:21,709 - INFO - Training for 20 epochs | Batch Size: 32 | Val Split: 0.1 | Learning Rate: 1e-4
+
+2025-07-17 11:26:21,719 - INFO - TRAINING STARTED !
+2025-07-17 11:27:39,798 - INFO - [Epoch 1/20] Train Loss: 1.2565 | Val Loss: 1.0251 | Time: 78.08s
+2025-07-17 11:27:39,806 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:29:04,520 - INFO - [Epoch 2/20] Train Loss: 1.0247 | Val Loss: 0.9779 | Time: 84.71s
+2025-07-17 11:29:04,526 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:30:25,702 - INFO - [Epoch 3/20] Train Loss: 1.0085 | Val Loss: 1.0112 | Time: 81.18s
+2025-07-17 11:31:43,812 - INFO - [Epoch 4/20] Train Loss: 0.9625 | Val Loss: 0.9176 | Time: 78.11s
+2025-07-17 11:31:43,819 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:33:00,861 - INFO - [Epoch 5/20] Train Loss: 0.9695 | Val Loss: 1.0214 | Time: 77.04s
+2025-07-17 11:34:28,092 - INFO - [Epoch 6/20] Train Loss: 0.9763 | Val Loss: 1.0302 | Time: 87.23s
+2025-07-17 11:35:50,757 - INFO - [Epoch 7/20] Train Loss: 0.9978 | Val Loss: 1.0054 | Time: 82.67s
+2025-07-17 11:37:14,753 - INFO - [Epoch 8/20] Train Loss: 0.9938 | Val Loss: 0.9557 | Time: 84.00s
+2025-07-17 11:38:37,175 - INFO - [Epoch 9/20] Train Loss: 0.9325 | Val Loss: 1.0638 | Time: 82.42s
+2025-07-17 11:40:00,230 - INFO - [Epoch 10/20] Train Loss: 0.9666 | Val Loss: 0.9931 | Time: 83.05s
+2025-07-17 11:41:18,068 - INFO - [Epoch 11/20] Train Loss: 0.9021 | Val Loss: 0.9149 | Time: 77.84s
+2025-07-17 11:41:18,076 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:42:41,170 - INFO - [Epoch 12/20] Train Loss: 0.9529 | Val Loss: 1.0902 | Time: 83.09s
+2025-07-17 11:44:00,474 - INFO - [Epoch 13/20] Train Loss: 0.8704 | Val Loss: 0.9009 | Time: 79.30s
+2025-07-17 11:44:00,481 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:45:19,833 - INFO - [Epoch 14/20] Train Loss: 0.9226 | Val Loss: 1.0495 | Time: 79.35s
+2025-07-17 11:46:41,666 - INFO - [Epoch 15/20] Train Loss: 0.8672 | Val Loss: 0.9006 | Time: 81.83s
+2025-07-17 11:46:41,673 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:47:58,734 - INFO - [Epoch 16/20] Train Loss: 0.8850 | Val Loss: 0.9334 | Time: 77.06s
+2025-07-17 11:49:18,580 - INFO - [Epoch 17/20] Train Loss: 0.8591 | Val Loss: 0.8195 | Time: 79.85s
+2025-07-17 11:49:18,587 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:50:37,956 - INFO - [Epoch 18/20] Train Loss: 0.8722 | Val Loss: 0.7847 | Time: 79.37s
+2025-07-17 11:50:37,963 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:51:56,393 - INFO - [Epoch 19/20] Train Loss: 0.8961 | Val Loss: 0.7561 | Time: 78.43s
+2025-07-17 11:51:56,399 - INFO - Saved best model to checkpoints/2025-07-17_hist2noise_mean_bins16.pth
+2025-07-17 11:53:16,469 - INFO - [Epoch 20/20] Train Loss: 0.9021 | Val Loss: 0.8690 | Time: 80.07s
+2025-07-17 11:53:16,596 - INFO - Loss plot saved to plots/2025-07-17_loss_plot.png
