@@ -12,7 +12,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot
+from utils.utils import plot_images, save_loss_plot, plot_debug_images
 # Eval
 from skimage.metrics import peak_signal_noise_ratio as psnr
 
@@ -28,26 +28,24 @@ else:
 
 
 def get_data_loaders(config):
-    # Resolve root_dir path
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
-    # Instantiate the full dataset (mode param ignored here)
+    # Load the full dataset
     full_dataset = HistogramBinomDataset(**dataset_cfg)
 
-    # Compute split sizes
+    # Get lengths for splitting
     val_ratio = config.get('val_split', 0.2)
     total_len = len(full_dataset)
     val_len = int(total_len * val_ratio)
     train_len = total_len - val_len
 
-    # Split dataset
-    train_dataset, val_dataset = random_split(full_dataset, [train_len, val_len])
+    # Split by sample index, not scene name
+    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_len, val_len])
 
-    logger.info(f"Train dataset size: {len(train_dataset)}")
-    logger.info(f"Val dataset size: {len(val_dataset)}")
+    logger.info(f"Train dataset size: {len(train_dataset)} samples")
+    logger.info(f"Val dataset size: {len(val_dataset)} samples")
 
-    # Create DataLoaders with differing shuffle flags
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['batch_size'],
@@ -67,7 +65,6 @@ def get_data_loaders(config):
     )
 
     train_img = next(iter(train_loader))
-
     logger.info(f"Input shape: {train_img['input'].shape}")
     logger.info(f"Target shape: {train_img['target'].shape}")
     logger.info(f"Noisy shape: {train_img['noisy'].shape}")
@@ -123,11 +120,11 @@ def evaluate_sample(model, input_tensor, clean_tensor):
 
 
 # TRAINING STEP
-def train_epoch(model, dataloader, optimizer, criterion, device):
+def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, debug=True):
     model.train()
     total_loss = 0
 
-    for batch in dataloader:
+    for batch_idx, batch in enumerate(dataloader):
         hist = batch['input'].to(device)        # B, 3, H, W
         target = batch['target'].to(device)     # 3, H, W
 
@@ -139,6 +136,10 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
         optimizer.step()
 
         total_loss += loss.item()
+
+        # Plot the first batch in the first epoch for debugging
+        if debug:
+            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, device=device)
 
     return total_loss / len(dataloader)
 
@@ -188,7 +189,7 @@ def train_model(config):
 
     # Optimizer + Loss (MSE for Mean)
     # TODO: add support for Cross Entropy for distribution
-    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]), weight_decay=float(model_cfg["weight_decay"]))
+    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
     criterion = nn.MSELoss()
     
     # Model Name
@@ -212,7 +213,7 @@ def train_model(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, debug=dataset_cfg['debug'])
         val_loss = validate_epoch(model, val_loader, criterion, device)
 
         train_losses.append(train_loss)
@@ -245,7 +246,7 @@ def evaluate_model(config):
 
     # Load datasets using config values
     hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
-    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
+    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, hist_regeneration=False)
 
     # Get samples
     hist_sample = hist_dataset.__getitem__(idx)
@@ -269,8 +270,8 @@ def evaluate_model(config):
     # Evaluate models
     hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)
     img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
-    init_psnr = psnr(noisy.cpu().numpy(), clean.cpu().numpy(), data_range=1.0)
-    target_psnr = psnr(target.cpu().numpy(), clean.cpu().numpy(), data_range=1.0)
+    init_psnr = psnr(clean.cpu().numpy(), noisy.cpu().numpy(), data_range=1.0)
+    target_psnr = psnr(clean.cpu().numpy(), target.cpu().numpy(), data_range=1.0)
 
     logger.info(f"\nScene: {scene}")
     logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")

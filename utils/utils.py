@@ -55,35 +55,97 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     plt.show()
 
 
+def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, device='cpu'):
+    # batch['input'], batch['noisy'], batch['target'], optionally batch['clean']
+    # preds: model output corresponding to batch['input']
+    
+    input_imgs = batch['input'].cpu()
+    noisy_imgs = batch['noisy'].cpu()
+    target_imgs = batch['target'].cpu()
+    clean_imgs = batch.get('clean')
+    if clean_imgs is not None:
+        clean_imgs = clean_imgs.cpu()
+    if preds is not None:
+        preds = preds.detach().cpu()
+    
+    # Pick first image in batch for display (or loop a few)
+    idx = 0
 
-def standardize_image(img: np.ndarray, per_channel: bool = True, epsilon: float = 1e-8) -> np.ndarray:
+    fig, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
+    axes[0].imshow(input_imgs[idx].permute(1,2,0))
+    axes[0].set_title("Input")
+    axes[1].imshow(target_imgs[idx].permute(1,2,0))
+    axes[1].set_title("Target")
+    axes[2].imshow(noisy_imgs[idx].permute(1,2,0))
+    axes[2].set_title("Noisy")
+    axes[3].imshow(preds[idx].permute(1,2,0))
+    axes[3].set_title("Predicted")
+    if clean_imgs is not None:
+        axes[4].imshow(clean_imgs[idx].permute(1,2,0))
+        axes[4].set_title("Clean")
+
+    for ax in axes:
+        ax.axis('off')
+    plt.suptitle(f"Epoch {epoch} Batch {batch_idx}")
+    plt.show()
+
+
+def standardize_image(img: np.ndarray, epsilon: float = 1e-8) -> np.ndarray:
     """
-    Standardizes an image to have zero mean and unit variance.
-
-    Args:
-        img (np.ndarray): Input image with shape (H, W, C) or (C, H, W)
-        per_channel (bool): If True, normalize each channel independently. Otherwise, normalize globally.
-        epsilon (float): Small value to avoid division by zero.
-
-    Returns:
-        np.ndarray: Standardized image with same shape.
+    Standardize image(s) to zero mean, unit variance per channel.
+    Supports input shapes:
+      - Single image: (H, W, C)
+      - Batch: (N, H, W, C)
     """
-    # Ensure shape is (H, W, C)
-    if img.ndim == 3 and img.shape[0] in [1, 3] and img.shape[0] < img.shape[-1]:
-        img = np.transpose(img, (1, 2, 0))  # (C, H, W) -> (H, W, C)
-
     img = img.astype(np.float32)
 
-    if per_channel:
+    # Batch of images (N, H, W, C)
+    if img.ndim == 4:
+        for i in range(img.shape[0]):
+            for c in range(img.shape[-1]):
+                channel = img[i, ..., c]
+                mean = channel.mean()
+                std = channel.std()
+                img[i, ..., c] = (channel - mean) / (std + epsilon)
+    
+    # Single image (H, W, C)
+    elif img.ndim == 3:
         for c in range(img.shape[-1]):
             channel = img[..., c]
             mean = channel.mean()
             std = channel.std()
             img[..., c] = (channel - mean) / (std + epsilon)
     else:
-        mean = img.mean()
-        std = img.std()
-        img = (img - mean) / (std + epsilon)
+        raise ValueError("Input must be 3D or 4D ndarray")
+
+    return img
+
+
+def normalize_image(img: np.ndarray, epsilon=1e-8) -> np.ndarray:
+    """
+    Min-max normalize image(s) to [0,1] per channel.
+    Supports input shape:
+      - Single image: (H, W, C)
+      - Batch: (N, H, W, C)
+    """
+    img = img.astype(np.float32)
+    if img.ndim == 3:
+        # Single image (H, W, C)
+        for c in range(img.shape[-1]):
+            channel = img[..., c]
+            min_val = channel.min()
+            max_val = channel.max()
+            img[..., c] = (channel - min_val) / (max_val - min_val + epsilon)
+    elif img.ndim == 4:
+        # Batch of images (N, H, W, C)
+        for i in range(img.shape[0]):
+            for c in range(img.shape[-1]):
+                channel = img[i, ..., c]
+                min_val = channel.min()
+                max_val = channel.max()
+                img[i, ..., c] = (channel - min_val) / (max_val - min_val + epsilon)
+    else:
+        raise ValueError("Input must be 3D or 4D ndarray")
 
     return img
 

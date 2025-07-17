@@ -6,7 +6,7 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
-from utils.utils import standardize_image
+from utils.utils import standardize_image, normalize_image
 
 # Logger
 import logging
@@ -17,7 +17,8 @@ class HistogramBinomDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
                 data_augmentation: bool = True, virt_size: int = 1000,
                 low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
-                clean: bool = False, cached_dir: str = None, debug: bool = False, device: str = None):
+                clean: bool = False, cached_dir: str = None, debug: bool = False, 
+                device: str = None, hist_regeneration: bool = False, scene_names=None):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -30,6 +31,7 @@ class HistogramBinomDataset(Dataset):
         self.cached_dir = cached_dir
         self.debug = debug
         self.device = device or torch.device("cpu")
+        self.hist_regeneration = hist_regeneration
 
         self.spp1_images = {}
         self.hist_features = {}
@@ -52,7 +54,15 @@ class HistogramBinomDataset(Dataset):
                     key = fname.split(f"_spp")[0]
                     scene_keys.append((key, full_subdir))
 
-        self.scene_names = sorted(set(key for key, _ in scene_keys))
+        all_scenes = sorted(set(key for key, _ in scene_keys))
+
+        if scene_names is not None:
+            # Filter scene_keys to only those in scene_names list
+            scene_names_set = set(scene_names)
+            scene_keys = [(key, folder) for key, folder in scene_keys if key in scene_names_set]
+            self.scene_names = sorted(scene_names_set.intersection(all_scenes))
+        else:
+            self.scene_names = all_scenes
         assert self.scene_names, f"No scenes found in {self.root_dir}"
 
         logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
@@ -78,7 +88,7 @@ class HistogramBinomDataset(Dataset):
                 clean_img = tifffile.imread(clean_path)
                 clean_img = standardize_image(clean_img)
                 self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()
-            
+
             # Select random input(N-1)/target(1) indices for this scene
             indices = list(range(self.low_spp))
             random.shuffle(indices)
@@ -86,33 +96,31 @@ class HistogramBinomDataset(Dataset):
             target_idx = indices[-1]
             self.scene_sample_indices[key] = (input_idx, target_idx)
 
-            # Histogram Caching (only in hist mode)
+            # Histogram Caching (hist mode only)
             if self.mode == 'hist':
                 hist_filename = f"{key}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
                 cache_path = os.path.join(self.cached_dir, hist_filename) if self.cached_dir else None
-                if cache_path and os.path.exists(cache_path):
+
+                if cache_path and os.path.exists(cache_path) and not self.hist_regeneration:
                     cached = np.load(cache_path)
                     self.hist_features[key] = cached['features']
                 else:
                     logger.info(f"Generating Histogram: {hist_filename}")
-                    input_idx, _ = self.scene_sample_indices[key]
-                    
                     input_samples_raw = spp1_img[input_idx]  # shape: (N-1, H, W, 3)
-                    input_samples_std = standardize_image(input_samples_raw.copy())
 
-                    # generate historgam - shape: (H, W, 3, B)
+                    # generate histogram - shape: (H, W, 3, B)
                     hist, _ = generate_histograms(input_samples_raw, self.hist_bins, self.device)
                     hist = hist.astype(np.float32)
 
-                    # normalise histogram
-                    hist_sum = np.sum(hist, axis=-1, keepdims=True)  # shape: (H, W, 3, 1)
+                    hist_sum = np.sum(hist, axis=-1, keepdims=True)
                     hist /= (hist_sum + 1e-8)
 
-                    # add mean and variance to histogram data
-                    mean = input_samples_std.mean(axis=0)[..., None]
-                    var = input_samples_std.var(axis=0)[..., None]
+                    # Use normalized mean and variance features
+                    input_samples_norm = standardize_image(input_samples_raw.copy())
+                    mean = input_samples_norm.mean(axis=0)[..., None]
+                    var = input_samples_norm.var(axis=0)[..., None]
 
-                    features = np.concatenate([hist, mean, var], axis=-1)  # shape: (H, W, 3, B+2)
+                    features = np.concatenate([hist, mean, var], axis=-1)
                     self.hist_features[key] = features
                     if cache_path:
                         np.savez_compressed(cache_path, features=features)
@@ -148,24 +156,6 @@ class HistogramBinomDataset(Dataset):
 
         target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()
 
-        # DATA AUGMENTATION
-        if self.data_augmentation:
-            # Random horizontal flip
-            if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[2])
-                target_tensor = torch.flip(target_tensor, dims=[1])
-                noisy_tensor = torch.flip(noisy_tensor, dims=[1])
-                if clean_tensor is not None:
-                    clean_tensor = torch.flip(clean_tensor, dims=[1])
-
-            # Random vertical flip
-            if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[1])
-                target_tensor = torch.flip(target_tensor, dims=[2])
-                noisy_tensor = torch.flip(noisy_tensor, dims=[2])
-                if clean_tensor is not None:
-                    clean_tensor = torch.flip(clean_tensor, dims=[2])
-
         # CROP
         if self.crop_size:
             if crop_coords is None:
@@ -178,6 +168,24 @@ class HistogramBinomDataset(Dataset):
             noisy_tensor = noisy_tensor[:, i:i+h, j:j+w]
             if clean_tensor is not None:
                 clean_tensor = clean_tensor[:, i:i+h, j:j+w]
+
+        # DATA AUGMENTATION
+        if self.data_augmentation:
+            # Random horizontal flip
+            if random.random() > 0.5:
+                input_tensor = torch.flip(input_tensor, dims=[-1])
+                target_tensor = torch.flip(target_tensor, dims=[-1])
+                noisy_tensor = torch.flip(noisy_tensor, dims=[-1])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[-1])
+
+            # Random vertical flip
+            if random.random() > 0.5:
+                input_tensor = torch.flip(input_tensor, dims=[-2])
+                target_tensor = torch.flip(target_tensor, dims=[-2])
+                noisy_tensor = torch.flip(noisy_tensor, dims=[-2])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[-2])
 
         return {
             "input": input_tensor,
