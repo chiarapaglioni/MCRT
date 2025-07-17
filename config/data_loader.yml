@@ -3,6 +3,9 @@ batch_size: 32
 num_workers: 4
 shuffle: false
 
+out_mode: mean                          # 'mean' or 'dist'   
+target_samples: 3                       # Number of samples to use for the target histogram            
+
 dataset:
   root_dir: output                      # Raw dataset location
   cached_dir: histograms                # Cached histograms are saved

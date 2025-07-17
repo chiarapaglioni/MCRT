@@ -1,75 +1,90 @@
+import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
+
+# Datasets
 from dataset.HistImgDataset import HistogramBinomDataset
+from dataset.HistDataset import HistogramDataset
 
 # Logger
 import logging
 logger = logging.getLogger(__name__)
 
-def test_data_loader(config):
-    # Dataset configuration
-    dataset_cfg = config['dataset']
 
-    # Resolve root_dir relative to this script
+def test_data_loader(config):
+    dataset_cfg = config['dataset']
+    out_mode = config.get("out_mode", "dist")
+    hist_bins = dataset_cfg.get("hist_bins", 16)
+
+    # Resolve dataset root
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
-    # Instantiate dataset
-    dataset = HistogramBinomDataset(**dataset_cfg)
+    logger.info(f"Data Loader - Mode: {out_mode} !!")
 
-    # Create DataLoader
-    dataloader = DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], shuffle=config['shuffle'])
+    # Pick dataset based on out_mode
+    if out_mode == "dist":
+        dataset = HistogramDataset(**dataset_cfg)
+        input_key = 'input_hist'
+        target_key = 'target_hist'
+    elif out_mode == "mean":
+        dataset = HistogramBinomDataset(**dataset_cfg)
+        input_key = 'input'
+        target_key = 'target'
+    else:
+        raise ValueError(f"Unsupported out_mode: {out_mode}. Must be 'dist' or 'mean'.")
 
-    # Iterate over a few batches
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config.get('batch_size', 1),
+        num_workers=config.get('num_workers', 0),
+        shuffle=config.get('shuffle', False)
+    )
+
     for batch in dataloader:
-        logger.info(f"Keys: {batch.keys()}")
-        logger.info(f"Input shape: {batch['input'].shape}")     # (B, 3, B, H, W) in 'hist' mode
-        logger.info(f"Target shape: {batch['target'].shape}")   # same
-        logger.info(f"Noisy shape: {batch['noisy'].shape}")     # (B, 3, H, W)
-        if 'clean' in batch:
-            logger.info(f"Clean shape: {batch['clean'].shape}") # (B, 3, H, W)
+        logger.info(f"Batch keys: {batch.keys()}")
+        logger.info(f"Input shape:  {batch[input_key].shape}")
+        logger.info(f"Target shape: {batch[target_key].shape}")
+        if 'clean' in batch and batch['clean'] is not None:
+            logger.info(f"Clean shape: {batch['clean'].shape}")
         logger.info(f"Scene: {batch['scene']}")
 
-        # Optional: visualize histograms
-        if dataset.mode == 'hist':
-            input_hist = batch['input'][0]  # shape: (3, bins+2, H, W)
-            logger.info(f"Histogram shape (C, B+2, H, W): {input_hist.shape}")
+        # Plot histograms for a pixel (center)
+        input_hist = batch[input_key][0].numpy()   # shape: (C, B, H, W)
+        x, y = input_hist.shape[2] // 2, input_hist.shape[3] // 2
 
-            input_hist_np = input_hist.numpy()
+        n_plots = 2 if out_mode == "dist" else 1
+        fig, axs = plt.subplots(1, n_plots, figsize=(10, 4))
+        axs = [axs] if n_plots == 1 else axs
 
-            # Choose a pixel coordinate
-            x, y = 50, 50
+        def plot_hist_bar(ax, hist, title, used_bins):
+            r = hist[0, :used_bins, y, x]
+            g = hist[1, :used_bins, y, x]
+            b = hist[2, :used_bins, y, x]
 
-            num_bins = config['dataset']['hist_bins']  # e.g., 8
+            bar_width = 0.25
+            bin_positions = np.arange(used_bins)
 
-            # Extract hist bins and stats
-            r_hist = input_hist_np[0, :num_bins, y, x]
-            g_hist = input_hist_np[1, :num_bins, y, x]
-            b_hist = input_hist_np[2, :num_bins, y, x]
+            ax.bar(bin_positions - bar_width, r, width=bar_width, color='red', label='R')
+            ax.bar(bin_positions, g, width=bar_width, color='green', label='G')
+            ax.bar(bin_positions + bar_width, b, width=bar_width, color='blue', label='B')
 
-            r_mean = input_hist_np[0, num_bins, y, x]
-            g_mean = input_hist_np[1, num_bins, y, x]
-            b_mean = input_hist_np[2, num_bins, y, x]
+            ax.set_title(title)
+            ax.set_xlabel("Bin")
+            ax.set_ylabel("Counts")
+            ax.set_xticks(bin_positions)
+            ax.legend()
 
-            r_var = input_hist_np[0, num_bins + 1, y, x]
-            g_var = input_hist_np[1, num_bins + 1, y, x]
-            b_var = input_hist_np[2, num_bins + 1, y, x]
+        if out_mode == "mean":
+            used_bins = hist_bins  # Only the histogram part
+            plot_hist_bar(axs[0], input_hist, "Input Histogram", used_bins)
+        else:  # dist mode
+            used_bins = input_hist.shape[1]  # Full histogram range
+            target_hist = batch[target_key][0].numpy()
+            plot_hist_bar(axs[0], input_hist, "Input Histogram", used_bins)
+            plot_hist_bar(axs[1], target_hist, "Target Histogram", used_bins)
 
-            # logger.info
-            logger.info(f"Pixel ({x},{y}):")
-            logger.info(f"  Red   - bins: {r_hist}, mean: {r_mean:.4f}, var: {r_var:.4f}")
-            logger.info(f"  Green - bins: {g_hist}, mean: {g_mean:.4f}, var: {g_var:.4f}")
-            logger.info(f"  Blue  - bins: {b_hist}, mean: {b_mean:.4f}, var: {b_var:.4f}")
+        plt.tight_layout()
+        plt.show()
 
-            # Plot
-            bins = range(num_bins)
-            plt.plot(bins, r_hist, label='Red')
-            plt.plot(bins, g_hist, label='Green')
-            plt.plot(bins, b_hist, label='Blue')
-            plt.xlabel('Bin')
-            plt.ylabel('Counts')
-            plt.title(f'Histogram bin counts for pixel ({x},{y})')
-            plt.legend()
-            plt.show()
-                
-        break
+        break  # Just test one batch

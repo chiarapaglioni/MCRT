@@ -184,7 +184,7 @@ class UNet(nn.Module):
 
         out = self.final(x)
 
-        if self.out_mode == 'distribution':
+        if self.out_mode == 'dist':
             B, _, H, W = out.shape
             out = out.view(B, 3, self.n_bins, H, W)
             out = F.softmax(out, dim=2)  # softmax over bins
