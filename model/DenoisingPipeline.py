@@ -77,14 +77,14 @@ def get_data_loaders(config):
     return train_loader, val_loader
 
 
-def load_model(model_path, mode, out_mode='mean', hist_bins=16, device='cpu'):
+def load_model(model_config, model_path, mode, hist_bins=16, device='cpu'):
     model = UNet(
-        in_channels=3,
+        in_channels=model_config['in_channels'],
         n_bins=hist_bins,
-        out_mode=out_mode,
-        merge_mode='concat',
-        depth=3,
-        start_filters=64,
+        out_mode=model_config['out_mode'],
+        merge_mode=model_config['merge_mode'],
+        depth=model_config['depth'],
+        start_filters=model_config['start_filters'],
         mode=mode
     ).to(device)
     
@@ -229,7 +229,7 @@ def train_model(config):
             logger.info(f"Saved best model to {save_path}")
         
     # save plot loss
-    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_loss_plot.png")
+    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_loss_plot.png")
 
 
 
@@ -263,8 +263,8 @@ def evaluate_model(config):
     scene = hist_sample["scene"]
 
     # Load models from checkpoint paths in config
-    hist_model = load_model(config["eval"]["hist_checkpoint"], mode="hist", device=device)
-    img_model = load_model(config["eval"]["img_checkpoint"], mode="img", device=device)
+    hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
 
     # Evaluate models
     hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)

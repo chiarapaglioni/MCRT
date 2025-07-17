@@ -1,9 +1,17 @@
 # Evaluation Parameters
 eval:
-  idx: 51              # Sample index to evaluate
-  seed: 42             # Seed for consistent shuffling and cropping
-  hist_checkpoint: checkpoints/2025-07-15_128_hist2noise_mean_bins16.pth
-  img_checkpoint: checkpoints/2025-07-15_128_noise2noise_mean_binsimg.pth
+  idx: 32              # Sample index to evaluate
+  hist_checkpoint: checkpoints/2025-07-17_128_hist2noise_mean_bins16.pth
+  img_checkpoint: checkpoints/2025-07-17_128_noise2noise_mean_binsimg.pth
+
+model:
+  in_channels: 3
+  out_mode: mean                        # 'mean' or 'distribution'
+  merge_mode: concat                    # 'add' or 'concat'
+  depth: 3
+  start_filters: 32
+  learning_rate: 1e-4
+  weight_decay: 1e-5
 
 # Dataset 
 dataset:
