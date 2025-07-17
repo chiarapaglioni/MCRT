@@ -32,11 +32,16 @@ class HistogramBinomDataset(Dataset):
         self.device = device or torch.device("cpu")
 
         self.spp1_images = {}
+        self.hist_features = {}
         self.noisy_images = {}
         self.clean_images = {}
-        self.scene_paths = {}  # full path for each logical scene
+        self.scene_paths = {}
+        self.scene_sample_indices = {}
 
-        # Search for .tiff files inside all subfolders
+        if self.cached_dir and not os.path.exists(self.cached_dir):
+            os.makedirs(self.cached_dir)
+
+        # Search for .tiff files inside subfolders
         scene_keys = []
         for subdir in sorted(os.listdir(self.root_dir)):
             full_subdir = os.path.join(self.root_dir, subdir)
@@ -44,97 +49,122 @@ class HistogramBinomDataset(Dataset):
                 continue
             for fname in os.listdir(full_subdir):
                 if fname.endswith(f"spp1x{self.low_spp}.tiff"):
-                    key = fname.split(f"_spp")[0]  # e.g., 'scene1-A'
+                    key = fname.split(f"_spp")[0]
                     scene_keys.append((key, full_subdir))
 
-        # De-duplicate and store
         self.scene_names = sorted(set(key for key, _ in scene_keys))
         assert self.scene_names, f"No scenes found in {self.root_dir}"
 
         logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
 
-        if self.cached_dir and not os.path.exists(self.cached_dir):
-            os.makedirs(self.cached_dir)
-
-        # Load and Normalise Data
         for key, folder in scene_keys:
-            #  Get Images Paths
             spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
             noisy_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.low_spp}.tiff")), None)
             clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
 
             assert spp1_file and noisy_file, f"Missing files for scene: {key} in {folder}"
-
+            
+            # Load Noisy Images
             spp1_path = os.path.join(folder, spp1_file)
             noisy_path = os.path.join(folder, noisy_file)
-
-            spp1_img = tifffile.imread(spp1_path)  # (low_spp, H, W, 3)
-            noisy_img = tifffile.imread(noisy_path)  # (H, W, 3)
-
-            # Standardize/Normalise Images
-            spp1_img = standardize_image(spp1_img)
-            noisy_img = standardize_image(noisy_img)
+            spp1_img = tifffile.imread(spp1_path)       # (low_spp, H, W, 3)
+            noisy_img = tifffile.imread(noisy_path)     # (H, W, 3)
 
             self.scene_paths[key] = folder
-            self.spp1_images[key] = spp1_img
-            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()
-
+            
+            # Load Clean Images
             if self.clean and clean_file:
                 clean_path = os.path.join(folder, clean_file)
                 clean_img = tifffile.imread(clean_path)
                 clean_img = standardize_image(clean_img)
                 self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()
+            
+            # Select random input(N-1)/target(1) indices for this scene
+            indices = list(range(self.low_spp))
+            random.shuffle(indices)
+            input_idx = indices[:-1]
+            target_idx = indices[-1]
+            self.scene_sample_indices[key] = (input_idx, target_idx)
 
+            # Histogram Caching (only in hist mode)
+            if self.mode == 'hist':
+                hist_filename = f"{key}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
+                cache_path = os.path.join(self.cached_dir, hist_filename) if self.cached_dir else None
+                if cache_path and os.path.exists(cache_path):
+                    cached = np.load(cache_path)
+                    self.hist_features[key] = cached['features']
+                else:
+                    logger.info(f"Generating Histogram: {hist_filename}")
+                    input_idx, _ = self.scene_sample_indices[key]
+                    
+                    input_samples_raw = spp1_img[input_idx]  # shape: (N-1, H, W, 3)
+                    input_samples_std = standardize_image(input_samples_raw.copy())
+
+                    # generate historgam - shape: (H, W, 3, B)
+                    hist, _ = generate_histograms(input_samples_raw, self.hist_bins, self.device)
+                    hist = hist.astype(np.float32)
+
+                    # normalise histogram
+                    hist_sum = np.sum(hist, axis=-1, keepdims=True)  # shape: (H, W, 3, 1)
+                    hist /= (hist_sum + 1e-8)
+
+                    # add mean and variance to histogram data
+                    mean = input_samples_std.mean(axis=0)[..., None]
+                    var = input_samples_std.var(axis=0)[..., None]
+
+                    features = np.concatenate([hist, mean, var], axis=-1)  # shape: (H, W, 3, B+2)
+                    self.hist_features[key] = features
+                    if cache_path:
+                        np.savez_compressed(cache_path, features=features)
+
+            # NORMALIZATION
+            spp1_img = standardize_image(spp1_img)
+            noisy_img = standardize_image(noisy_img)
+
+            self.spp1_images[key] = spp1_img
+            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()
 
     def __len__(self):
         return self.virt_size
 
-
-    def __getitem__(self, idx, seed=None, crop_coords=None):
-        if seed is not None:
-            random.seed(seed)  # make shuffle deterministic
-
+    def __getitem__(self, idx, crop_coords=None):
         scene = self.scene_names[idx % len(self.scene_names)]
         spp1_img = self.spp1_images[scene]
         noisy_tensor = self.noisy_images[scene]
         clean_tensor = self.clean_images.get(scene, None)
 
-        # Consistent sample selection
-        indices = list(range(self.low_spp))
-        random.shuffle(indices)
-        input_indices = indices[:-1]
-        target_index = indices[-1]
+        # Get Input and Target Samples
+        input_idx, target_idx = self.scene_sample_indices[scene]
+        input_samples = spp1_img[input_idx]
+        target_sample = spp1_img[target_idx]
 
-        input_samples = spp1_img[input_indices]  # (N-1, H, W, 3)
-        target_sample = spp1_img[target_index]   # (H, W, 3)
-
-        # HIST MODE
+        # LOAD DATA
         if self.mode == 'hist':
-            full_hist, _ = generate_histograms(input_samples, self.hist_bins, self.device)
-            full_hist = full_hist.astype(np.float32)
-            full_hist /= (np.sum(full_hist, axis=-1, keepdims=True) + 1e-8)
-
-            full_mean = input_samples.mean(axis=0)[..., None]
-            full_var = input_samples.var(axis=0)[..., None]
-
-            features = np.concatenate([full_hist, full_mean, full_var], axis=-1)
-
-            # Normalize Histiogram
-            hist = features[..., :self.hist_bins]
-            mean = features[..., self.hist_bins:self.hist_bins+1]
-            var = features[..., self.hist_bins+1:self.hist_bins+2]
-            hist /= (np.sum(hist, axis=-1, keepdims=True) + 1e-8)
-            features = np.concatenate([hist, mean, var], axis=-1)
-
+            features = self.hist_features[scene]
             input_tensor = torch.from_numpy(np.transpose(features, (2, 3, 0, 1))).float()
-
-        # IMG MODE
         else:
             input_avg = input_samples.mean(axis=0)
             input_tensor = torch.from_numpy(input_avg).permute(2, 0, 1).float()
 
-        # Target
         target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()
+
+        # DATA AUGMENTATION
+        if self.data_augmentation:
+            # Random horizontal flip
+            if random.random() > 0.5:
+                input_tensor = torch.flip(input_tensor, dims=[2])
+                target_tensor = torch.flip(target_tensor, dims=[1])
+                noisy_tensor = torch.flip(noisy_tensor, dims=[1])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[1])
+
+            # Random vertical flip
+            if random.random() > 0.5:
+                input_tensor = torch.flip(input_tensor, dims=[1])
+                target_tensor = torch.flip(target_tensor, dims=[2])
+                noisy_tensor = torch.flip(noisy_tensor, dims=[2])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[2])
 
         # CROP
         if self.crop_size:
@@ -143,17 +173,12 @@ class HistogramBinomDataset(Dataset):
             else:
                 i, j, h, w = crop_coords
 
-            if self.mode == 'hist':
-                input_tensor = input_tensor[:, :, i:i+h, j:j+w]
-            else:
-                input_tensor = input_tensor[:, i:i+h, j:j+w]
-
+            input_tensor = input_tensor[:, :, i:i+h, j:j+w] if self.mode == 'hist' else input_tensor[:, i:i+h, j:j+w]
             target_tensor = target_tensor[:, i:i+h, j:j+w]
             noisy_tensor = noisy_tensor[:, i:i+h, j:j+w]
             if clean_tensor is not None:
                 clean_tensor = clean_tensor[:, i:i+h, j:j+w]
 
-        # FINAL DICT
         return {
             "input": input_tensor,
             "target": target_tensor,
