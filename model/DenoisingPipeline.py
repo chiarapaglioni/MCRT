@@ -147,18 +147,29 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
 # VALIDATION STEP
 def validate_epoch(model, dataloader, criterion, device):
     model.eval()
-    total_loss = 0 
+    total_loss = 0
+    total_psnr = 0
+    count = 0
 
     with torch.no_grad():
         for batch in dataloader:
             hist = batch['input'].to(device)         # B, 3, H, W
-            target = batch['target'].to(device)      # 3, H, W
+            target = batch['target'].to(device)      # B, 3, H, W
 
-            pred = model(hist)
+            pred = model(hist).clamp(0, 1)
             loss = criterion(pred, target)
             total_loss += loss.item()
 
-    return total_loss / len(dataloader)
+            # Compute PSNR per image
+            for i in range(pred.shape[0]):
+                pred_i = pred[i].cpu().numpy()
+                target_i = target[i].cpu().numpy()
+                total_psnr += psnr(target_i, pred_i, data_range=1.0)
+                count += 1
+
+    avg_loss = total_loss / len(dataloader)
+    avg_psnr = total_psnr / count
+    return avg_loss, avg_psnr
 
 
 # TRAINING LOOP
@@ -188,7 +199,6 @@ def train_model(config):
     ).to(device)
 
     # Optimizer + Loss (MSE for Mean)
-    # TODO: add support for Cross Entropy for distribution
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
     criterion = nn.MSELoss()
     
@@ -214,15 +224,15 @@ def train_model(config):
         start_time = time.time()
 
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, debug=dataset_cfg['debug'])
-        val_loss = validate_epoch(model, val_loader, criterion, device)
+        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device)
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
         epoch_time = time.time() - start_time
         logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] "
-              f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} "
-              f"| Time: {epoch_time:.2f}s")
+            f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PSNR: {val_psnr:.2f} dB "
+            f"| Time: {epoch_time:.2f}s")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
