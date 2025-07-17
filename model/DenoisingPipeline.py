@@ -239,7 +239,6 @@ def evaluate_model(config):
 
     # Read evaluation parameters from config
     idx = config["eval"]["idx"]
-    seed = config["eval"]["seed"]
 
     # Dataset config
     dataset_cfg = config["dataset"]
@@ -249,9 +248,9 @@ def evaluate_model(config):
     img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
 
     # Get samples
-    hist_sample = hist_dataset.__getitem__(idx, seed=seed)
+    hist_sample = hist_dataset.__getitem__(idx)
     crop_coords = hist_sample["crop_coords"]
-    img_sample = img_dataset.__getitem__(idx, seed=seed, crop_coords=crop_coords)
+    img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
 
     # Prepare inputs for model
     hist_input = hist_sample["input"].unsqueeze(0).to(device)
@@ -271,11 +270,13 @@ def evaluate_model(config):
     hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)
     img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
     init_psnr = psnr(noisy.cpu().numpy(), clean.cpu().numpy(), data_range=1.0)
+    target_psnr = psnr(target.cpu().numpy(), clean.cpu().numpy(), data_range=1.0)
 
     logger.info(f"\nScene: {scene}")
     logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
+    logger.info(f"Target PSNR: {target_psnr:.2f} dB")
     logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
     logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
     # Plot results
-    plot_images(noisy, hist_pred, img_pred, target, clean=clean, save_path=f'plots/denoised_{idx}.png')
+    plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, target_psnr, clean, save_path=f'plots/denoised_{idx}.png')

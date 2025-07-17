@@ -21,7 +21,7 @@ def save_tiff(data, file_name):
     logger.info(f"Saved {file_name} with shape {data.shape} <3")
 
 
-def plot_images(noisy, hist_pred, noise_pred, target, clean=None, save_path=None):
+def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, target_psnr, clean=None, save_path=None):
     """
     Plot denoised images generated from the noise2noise and hist2nosie next to the clean one.
 
@@ -38,12 +38,12 @@ def plot_images(noisy, hist_pred, noise_pred, target, clean=None, save_path=None
         return t.detach().cpu().numpy().transpose(1, 2, 0)
     
     _, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
-    axes[0].imshow(to_img(noisy));       axes[0].set_title("Noisy Input")
-    axes[1].imshow(to_img(target));      axes[1].set_title("Target Sample")
-    axes[2].imshow(to_img(hist_pred));   axes[2].set_title("Hist2Noise Output")
-    axes[3].imshow(to_img(noise_pred));  axes[3].set_title("Noise2Noise Output")
+    axes[0].imshow(to_img(noisy));          axes[0].set_title(f"Noisy Input - PSNR:  {init_psnr:.2f} dB")
+    axes[1].imshow(to_img(target));         axes[1].set_title(f"Target Sample - PSNR:  {target_psnr:.2f} dB")
+    axes[2].imshow(to_img(hist_pred));      axes[2].set_title(f"Hist2Noise Output - PSNR:  {hist_psnr:.2f} dB")
+    axes[3].imshow(to_img(img_pred));       axes[3].set_title(f"Noise2Noise Output - PSNR:  {img_psnr:.2f} dB")
     if clean is not None:
-        axes[4].imshow(to_img(clean));   axes[4].set_title("Clean (GT)")
+        axes[4].imshow(to_img(clean));      axes[4].set_title("Clean (GT)")
     for ax in axes: ax.axis('off')
     plt.tight_layout()
 
