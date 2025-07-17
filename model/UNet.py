@@ -2,10 +2,32 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# CONVOLUTION
+# CONVOLUTIONS
 def conv3x3(in_channels, out_channels, stride=1, padding=1, bias=True):
-    # 2D Convolution using a 3x3 kernel
-    return nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=padding, bias=bias)
+    return nn.Conv2d(
+        in_channels, 
+        out_channels, 
+        kernel_size=3, 
+        stride=stride, 
+        padding=padding, 
+        bias=bias)
+
+
+def upconv2x2(in_channels, out_channels, mode='transpose'):
+    return nn.ConvTranspose2d(
+        in_channels,
+        out_channels,
+        kernel_size=2,
+        stride=2)
+
+
+def conv1x1(in_channels, out_channels, groups=1):
+    return nn.Conv2d(
+        in_channels,
+        out_channels,
+        kernel_size=1,
+        groups=groups,
+        stride=1)
 
 
 # DOWN PATH
@@ -17,9 +39,11 @@ class DownConv(nn.Module):
     def __init__(self, in_channels, out_channels, pooling=True):
         super(DownConv, self).__init__()
         self.pooling = pooling
+
         self.conv1 = conv3x3(in_channels, out_channels)
         self.conv2 = conv3x3(out_channels, out_channels)
         self.conv3 = conv3x3(out_channels, out_channels)
+
         if self.pooling:
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -27,6 +51,7 @@ class DownConv(nn.Module):
         x_skip = self.conv1(x)
         x = F.relu(self.conv2(x_skip))
         x = F.relu(self.conv3(x) + x_skip)  # residual add
+        
         before_pool = x
         if self.pooling:
             x = self.pool(x)
@@ -47,11 +72,12 @@ class UpConv(nn.Module):
 
         self.merge_mode = merge_mode
 
-        self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.upconv = upconv2x2(in_channels, out_channels)
 
-        if self.merge_mode == 'concat':
+        # merge mode
+        if self.merge_mode == 'concat':     # CONCAT
             self.conv1 = conv3x3(out_channels * 2, out_channels)
-        else:  # add
+        else:                               # ADD
             self.conv1 = conv3x3(out_channels, out_channels)
 
         self.conv2 = conv3x3(out_channels, out_channels)
@@ -59,10 +85,12 @@ class UpConv(nn.Module):
 
     def forward(self, from_down, from_up):
         from_up = self.upconv(from_up)
-        if self.merge_mode == 'concat':
+        # merge mode
+        if self.merge_mode == 'concat':     # CONCAT
             x = torch.cat((from_up, from_down), dim=1)
-        else:  # add
+        else:                               # ADD
             x = from_up + from_down
+        
         x_skip = self.conv1(x)
         x = F.relu(self.conv2(x_skip))
         x = F.relu(self.conv3(x) + x_skip)  # residual add
@@ -93,7 +121,7 @@ class UNet(nn.Module):
         self.start_filters = start_filters
         self.mode = mode
 
-        # Determine input channels based on mode
+        #INPUT CHANNELS
         if self.mode == 'hist':
             # self.input_channels = in_channels * n_bins
             # include mean + variance: 
@@ -101,7 +129,7 @@ class UNet(nn.Module):
         else:  # 'img' mode
             self.input_channels = in_channels
 
-        # Encoder
+        # ENCODER
         self.down_convs = nn.ModuleList()
         in_ch = self.input_channels
         for i in range(depth):
@@ -110,14 +138,14 @@ class UNet(nn.Module):
             self.down_convs.append(DownConv(in_ch, out_ch, pooling=pooling))
             in_ch = out_ch
 
-        # Decoder
+        # DECODER
         self.up_convs = nn.ModuleList()
         for i in reversed(range(depth - 1)):
             in_ch = start_filters * (2 ** (i + 1))
             out_ch = start_filters * (2 ** i)
             self.up_convs.append(UpConv(in_ch, out_ch, merge_mode=merge_mode))
 
-        # Final conv layer
+        # FINAL CONV
         if out_mode == 'mean':
             self.final = nn.Conv2d(start_filters, 3, kernel_size=1)
         elif out_mode == 'distribution':
