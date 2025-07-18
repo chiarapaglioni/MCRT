@@ -1,4 +1,5 @@
 import os
+import torch
 import logging
 import tifffile
 import numpy as np
@@ -189,3 +190,22 @@ def setup_logger(logfile='run.log'):
         ]
     )
     return logging.getLogger()
+
+
+def decode_pred_logits(pred_probs):
+    """
+    pred_probs: Tensor (B, 3, n_bins, H, W), probabilities already softmaxed
+    Returns:
+      expected_rgb: Tensor (B, 3, H, W) with pixel values in [0, 1]
+    """
+    B, C, bins, H, W = pred_probs.shape
+    device = pred_probs.device
+
+    # Create bin centers from 0 to 1
+    bin_centers = torch.linspace(0, 1, bins, device=device).view(1, 1, bins, 1, 1)  # shape (1,1,bins,1,1)
+
+    # Expected value: sum over bins of probability * bin_center
+    expected_rgb = (pred_probs * bin_centers).sum(dim=2)  # sum over bins dimension -> (B,3,H,W)
+
+    return expected_rgb
+

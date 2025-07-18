@@ -1,12 +1,12 @@
 # Evaluation Parameters
 eval:
-  idx: 92              # Sample index to evaluate
+  idx: 38              # Sample index to evaluate
   hist_checkpoint: checkpoints/2025-07-17_192_hist2noise_mean_bins16.pth
   img_checkpoint: checkpoints/2025-07-17_192_noise2noise_mean_binsimg.pth
 
 model:
   in_channels: 3
-  out_mode: mean                        # 'mean' or 'distribution'
+  out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 5
   start_filters: 32

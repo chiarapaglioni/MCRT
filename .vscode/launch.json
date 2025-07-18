@@ -28,19 +28,35 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Training",
+            "name": "Training - Denoising",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
-            "args": ["train", "--config", "config/train-cpu.yml"],
+            "args": ["train", "--config", "config/train_cpu.yml"],
             "console": "integratedTerminal"
         },
         {
-            "name": "Evaluation",
+            "name": "Evaluation - Denoising",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
             "args": ["eval", "--config", "config/eval.yml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Training - Generative",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["train_gen", "--config", "config/train_gen.yml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Evaluation - Generative",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["eval_gen", "--config", "config/eval_gen.yml"],
             "console": "integratedTerminal"
         }
     ]

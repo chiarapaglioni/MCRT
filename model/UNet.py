@@ -104,7 +104,7 @@ class UNet(nn.Module):
         Args:
             in_channels: number of input color channels (usually 3)
             n_bins: number of histogram bins (only relevant if mode='hist')
-            out_mode: 'mean' or 'distribution'
+            out_mode: 'mean' or 'dist'
             merge_mode: 'add' (residual) or 'concat'
             depth: number of downsampling layers
             start_filters: number of filters in first conv block
@@ -121,11 +121,14 @@ class UNet(nn.Module):
         self.start_filters = start_filters
         self.mode = mode
 
-        #INPUT CHANNELS
+        # INPUT CHANNELS
         if self.mode == 'hist':
-            # self.input_channels = in_channels * n_bins
-            # include mean + variance: 
-            self.input_channels = in_channels * (n_bins + 2)
+            if out_mode == 'dist':
+                self.input_channels = in_channels * n_bins          # original histogram
+            elif out_mode == 'mean':
+                self.input_channels = in_channels * (n_bins + 2)    # bins + mean + var
+            else:
+                raise ValueError(f"Unsupported out_mode: {out_mode}")
         else:  # 'img' mode
             self.input_channels = in_channels
 
@@ -148,10 +151,10 @@ class UNet(nn.Module):
         # FINAL CONV
         if out_mode == 'mean':
             self.final = nn.Conv2d(start_filters, 3, kernel_size=1)
-        elif out_mode == 'distribution':
+        elif out_mode == 'dist':
             self.final = nn.Conv2d(start_filters, 3 * n_bins, kernel_size=1)
         else:
-            raise ValueError("Invalid out_mode. Use 'mean' or 'distribution'.")
+            raise ValueError("Invalid out_mode. Use 'mean' or 'dist'.")
 
     def forward(self, x):
         """
@@ -187,6 +190,7 @@ class UNet(nn.Module):
         if self.out_mode == 'dist':
             B, _, H, W = out.shape
             out = out.view(B, 3, self.n_bins, H, W)
-            out = F.softmax(out, dim=2)  # softmax over bins
+            # do not apply softmax over bins here but outside!!
+            # out = F.softmax(out, dim=2) 
 
         return out

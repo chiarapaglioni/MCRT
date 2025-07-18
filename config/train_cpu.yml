@@ -14,7 +14,7 @@ dataset:
 
 model:
   in_channels: 3
-  out_mode: mean                        # 'mean' or 'distribution'
+  out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 3
   start_filters: 32
