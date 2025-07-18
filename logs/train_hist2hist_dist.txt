@@ -1,0 +1,175 @@
+2025-07-18 16:17:39,768 - INFO - MCRT DENOISING :)
+2025-07-18 16:17:39,771 - INFO - Training on cuda
+2025-07-18 16:17:39,771 - INFO - 27 scenes: ['banner_01_scene', 'banner_02_scene', 'bathroom2_scene', 'bathroom_scene', 'bedroom_scene', 'classroom_scene', 'cornell-box_scene', 'dining-room_scene', 'glass-of-water_scene', 'house_scene', 'house_scene-above', 'kitchen_scene', 'lamp_scene', 'lamp_scene-above', 'living-room-2_scene', 'living-room-3_scene', 'living-room_scene', 'matpreview_scene', 'matpreview_scene-above', 'spaceship_scene', 'staircase2_scene', 'staircase_scene', 'teapot-full_scene', 'veach-ajar_scene', 'veach-bidir_scene', 'veach-mis_scene', 'volumetric-caustic_scene']
+2025-07-18 16:17:39,932 - INFO - Computing input histogram for scene banner_01_scene
+2025-07-18 16:17:51,056 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:17:51,998 - INFO - Computing target histogram for scene banner_01_scene
+2025-07-18 16:18:00,381 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:18:00,746 - INFO - Computing input histogram for scene banner_02_scene
+2025-07-18 16:18:11,923 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:18:12,981 - INFO - Computing target histogram for scene banner_02_scene
+2025-07-18 16:18:21,342 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:18:21,648 - INFO - Computing input histogram for scene bathroom_scene
+2025-07-18 16:18:32,614 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:18:32,977 - INFO - Computing target histogram for scene bathroom_scene
+2025-07-18 16:18:41,343 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:18:41,643 - INFO - Computing input histogram for scene bathroom2_scene
+2025-07-18 16:18:52,774 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:18:53,002 - INFO - Computing target histogram for scene bathroom2_scene
+2025-07-18 16:19:01,359 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:19:01,625 - INFO - Computing input histogram for scene bedroom_scene
+2025-07-18 16:19:12,548 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:19:13,006 - INFO - Computing target histogram for scene bedroom_scene
+2025-07-18 16:19:21,388 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:19:21,666 - INFO - Computing input histogram for scene classroom_scene
+2025-07-18 16:19:32,604 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:19:33,510 - INFO - Computing target histogram for scene classroom_scene
+2025-07-18 16:19:41,919 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:19:42,236 - INFO - Computing input histogram for scene cornell-box_scene
+2025-07-18 16:19:53,369 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:19:54,518 - INFO - Computing target histogram for scene cornell-box_scene
+2025-07-18 16:20:02,881 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:20:03,217 - INFO - Computing input histogram for scene dining-room_scene
+2025-07-18 16:20:14,193 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:20:14,727 - INFO - Computing target histogram for scene dining-room_scene
+2025-07-18 16:20:23,094 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:20:23,405 - INFO - Computing input histogram for scene glass-of-water_scene
+2025-07-18 16:20:34,489 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:20:35,663 - INFO - Computing target histogram for scene glass-of-water_scene
+2025-07-18 16:20:44,021 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:20:44,345 - INFO - Computing input histogram for scene house_scene
+2025-07-18 16:20:55,410 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:20:57,103 - INFO - Computing target histogram for scene house_scene
+2025-07-18 16:21:05,487 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:21:05,836 - INFO - Computing input histogram for scene house_scene-above
+2025-07-18 16:21:16,970 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:21:18,390 - INFO - Computing target histogram for scene house_scene-above
+2025-07-18 16:21:26,755 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:21:27,083 - INFO - Computing input histogram for scene kitchen_scene
+2025-07-18 16:21:38,097 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:21:38,464 - INFO - Computing target histogram for scene kitchen_scene
+2025-07-18 16:21:46,877 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:21:47,155 - INFO - Computing input histogram for scene lamp_scene
+2025-07-18 16:21:58,183 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:21:58,934 - INFO - Computing target histogram for scene lamp_scene
+2025-07-18 16:22:07,326 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:22:07,627 - INFO - Computing input histogram for scene lamp_scene-above
+2025-07-18 16:22:18,603 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:22:19,461 - INFO - Computing target histogram for scene lamp_scene-above
+2025-07-18 16:22:27,850 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:22:28,146 - INFO - Computing input histogram for scene living-room_scene
+2025-07-18 16:22:39,066 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:22:39,326 - INFO - Computing target histogram for scene living-room_scene
+2025-07-18 16:22:47,689 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:22:47,990 - INFO - Computing input histogram for scene living-room-2_scene
+2025-07-18 16:22:59,128 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:22:59,414 - INFO - Computing target histogram for scene living-room-2_scene
+2025-07-18 16:23:07,834 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:23:08,135 - INFO - Computing input histogram for scene living-room-3_scene
+2025-07-18 16:23:19,325 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:23:20,902 - INFO - Computing target histogram for scene living-room-3_scene
+2025-07-18 16:23:29,298 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:23:29,648 - INFO - Computing input histogram for scene matpreview_scene
+2025-07-18 16:23:40,795 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:23:42,177 - INFO - Computing target histogram for scene matpreview_scene
+2025-07-18 16:23:50,621 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:23:50,977 - INFO - Computing input histogram for scene matpreview_scene-above
+2025-07-18 16:24:02,210 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:24:03,781 - INFO - Computing target histogram for scene matpreview_scene-above
+2025-07-18 16:24:12,187 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:24:12,540 - INFO - Computing input histogram for scene spaceship_scene
+2025-07-18 16:24:23,596 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:24:24,306 - INFO - Computing target histogram for scene spaceship_scene
+2025-07-18 16:24:32,678 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:24:32,981 - INFO - Computing input histogram for scene staircase_scene
+2025-07-18 16:24:44,035 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:24:45,013 - INFO - Computing target histogram for scene staircase_scene
+2025-07-18 16:24:53,359 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:24:53,698 - INFO - Computing input histogram for scene staircase2_scene
+2025-07-18 16:25:04,843 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:25:06,361 - INFO - Computing target histogram for scene staircase2_scene
+2025-07-18 16:25:14,746 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:25:15,089 - INFO - Computing input histogram for scene teapot-full_scene
+2025-07-18 16:25:26,277 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:25:27,758 - INFO - Computing target histogram for scene teapot-full_scene
+2025-07-18 16:25:36,125 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:25:36,442 - INFO - Computing input histogram for scene veach-ajar_scene
+2025-07-18 16:25:47,274 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:25:47,642 - INFO - Computing target histogram for scene veach-ajar_scene
+2025-07-18 16:25:56,036 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:25:56,306 - INFO - Computing input histogram for scene veach-bidir_scene
+2025-07-18 16:26:07,201 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:26:07,629 - INFO - Computing target histogram for scene veach-bidir_scene
+2025-07-18 16:26:15,982 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:26:16,275 - INFO - Computing input histogram for scene veach-mis_scene
+2025-07-18 16:26:27,311 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:26:27,546 - INFO - Computing target histogram for scene veach-mis_scene
+2025-07-18 16:26:35,905 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:26:36,208 - INFO - Computing input histogram for scene volumetric-caustic_scene
+2025-07-18 16:26:47,369 - INFO - Generated input histogram of shape (512, 512, 3, 16)
+2025-07-18 16:26:48,689 - INFO - Computing target histogram for scene volumetric-caustic_scene
+2025-07-18 16:26:57,098 - INFO - Generated target histogram of shape (512, 512, 3, 16)
+2025-07-18 16:26:57,496 - INFO - Starting training...
+2025-07-18 16:27:23,673 - INFO - [Epoch 1/50] Train Loss: 1.2996 | Val Loss: 1.0060 | PSNR: 19.07 dB | Time: 26.18s
+2025-07-18 16:27:23,747 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:27:49,542 - INFO - [Epoch 2/50] Train Loss: 0.9860 | Val Loss: 0.9236 | PSNR: 20.48 dB | Time: 25.79s
+2025-07-18 16:27:49,612 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:28:15,445 - INFO - [Epoch 3/50] Train Loss: 0.9139 | Val Loss: 0.8852 | PSNR: 20.64 dB | Time: 25.83s
+2025-07-18 16:28:15,514 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:28:41,393 - INFO - [Epoch 4/50] Train Loss: 0.8856 | Val Loss: 0.8829 | PSNR: 20.46 dB | Time: 25.88s
+2025-07-18 16:28:41,462 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:29:07,368 - INFO - [Epoch 5/50] Train Loss: 0.8791 | Val Loss: 0.8594 | PSNR: 20.99 dB | Time: 25.91s
+2025-07-18 16:29:07,445 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:29:33,320 - INFO - [Epoch 6/50] Train Loss: 0.8708 | Val Loss: 0.8490 | PSNR: 21.05 dB | Time: 25.87s
+2025-07-18 16:29:33,389 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:29:59,281 - INFO - [Epoch 7/50] Train Loss: 0.8654 | Val Loss: 0.8605 | PSNR: 20.66 dB | Time: 25.89s
+2025-07-18 16:30:25,199 - INFO - [Epoch 8/50] Train Loss: 0.8604 | Val Loss: 0.8587 | PSNR: 20.89 dB | Time: 25.92s
+2025-07-18 16:30:51,118 - INFO - [Epoch 9/50] Train Loss: 0.8528 | Val Loss: 0.8635 | PSNR: 20.80 dB | Time: 25.92s
+2025-07-18 16:31:17,034 - INFO - [Epoch 10/50] Train Loss: 0.8556 | Val Loss: 0.8378 | PSNR: 21.04 dB | Time: 25.92s
+2025-07-18 16:31:17,102 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:31:43,014 - INFO - [Epoch 11/50] Train Loss: 0.8571 | Val Loss: 0.8582 | PSNR: 20.68 dB | Time: 25.91s
+2025-07-18 16:32:08,902 - INFO - [Epoch 12/50] Train Loss: 0.8539 | Val Loss: 0.8678 | PSNR: 20.61 dB | Time: 25.89s
+2025-07-18 16:32:34,818 - INFO - [Epoch 13/50] Train Loss: 0.8545 | Val Loss: 0.8449 | PSNR: 20.93 dB | Time: 25.92s
+2025-07-18 16:33:00,744 - INFO - [Epoch 14/50] Train Loss: 0.8529 | Val Loss: 0.8530 | PSNR: 20.90 dB | Time: 25.93s
+2025-07-18 16:33:26,610 - INFO - [Epoch 15/50] Train Loss: 0.8500 | Val Loss: 0.8323 | PSNR: 20.81 dB | Time: 25.87s
+2025-07-18 16:33:26,680 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:33:52,570 - INFO - [Epoch 16/50] Train Loss: 0.8524 | Val Loss: 0.8444 | PSNR: 21.06 dB | Time: 25.89s
+2025-07-18 16:34:18,501 - INFO - [Epoch 17/50] Train Loss: 0.8448 | Val Loss: 0.8536 | PSNR: 20.75 dB | Time: 25.93s
+2025-07-18 16:34:44,376 - INFO - [Epoch 18/50] Train Loss: 0.8459 | Val Loss: 0.8601 | PSNR: 20.67 dB | Time: 25.87s
+2025-07-18 16:35:10,274 - INFO - [Epoch 19/50] Train Loss: 0.8385 | Val Loss: 0.8341 | PSNR: 20.82 dB | Time: 25.90s
+2025-07-18 16:35:36,174 - INFO - [Epoch 20/50] Train Loss: 0.8373 | Val Loss: 0.8441 | PSNR: 20.92 dB | Time: 25.90s
+2025-07-18 16:36:02,065 - INFO - [Epoch 21/50] Train Loss: 0.8512 | Val Loss: 0.8558 | PSNR: 20.72 dB | Time: 25.89s
+2025-07-18 16:36:27,963 - INFO - [Epoch 22/50] Train Loss: 0.8403 | Val Loss: 0.8494 | PSNR: 20.81 dB | Time: 25.90s
+2025-07-18 16:36:53,860 - INFO - [Epoch 23/50] Train Loss: 0.8473 | Val Loss: 0.8410 | PSNR: 21.07 dB | Time: 25.90s
+2025-07-18 16:37:19,757 - INFO - [Epoch 24/50] Train Loss: 0.8439 | Val Loss: 0.8228 | PSNR: 21.02 dB | Time: 25.90s
+2025-07-18 16:37:19,835 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:37:45,753 - INFO - [Epoch 25/50] Train Loss: 0.8418 | Val Loss: 0.8242 | PSNR: 20.97 dB | Time: 25.92s
+2025-07-18 16:38:11,618 - INFO - [Epoch 26/50] Train Loss: 0.8429 | Val Loss: 0.8149 | PSNR: 20.91 dB | Time: 25.87s
+2025-07-18 16:38:11,687 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:38:37,579 - INFO - [Epoch 27/50] Train Loss: 0.8483 | Val Loss: 0.8271 | PSNR: 20.93 dB | Time: 25.89s
+2025-07-18 16:39:03,446 - INFO - [Epoch 28/50] Train Loss: 0.8409 | Val Loss: 0.8503 | PSNR: 20.81 dB | Time: 25.87s
+2025-07-18 16:39:29,351 - INFO - [Epoch 29/50] Train Loss: 0.8386 | Val Loss: 0.8308 | PSNR: 21.05 dB | Time: 25.91s
+2025-07-18 16:39:55,233 - INFO - [Epoch 30/50] Train Loss: 0.8353 | Val Loss: 0.8288 | PSNR: 21.02 dB | Time: 25.88s
+2025-07-18 16:40:21,122 - INFO - [Epoch 31/50] Train Loss: 0.8418 | Val Loss: 0.8428 | PSNR: 21.03 dB | Time: 25.89s
+2025-07-18 16:40:47,027 - INFO - [Epoch 32/50] Train Loss: 0.8353 | Val Loss: 0.8108 | PSNR: 21.11 dB | Time: 25.90s
+2025-07-18 16:40:47,097 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:41:12,993 - INFO - [Epoch 33/50] Train Loss: 0.8338 | Val Loss: 0.8318 | PSNR: 20.97 dB | Time: 25.90s
+2025-07-18 16:41:38,858 - INFO - [Epoch 34/50] Train Loss: 0.8429 | Val Loss: 0.8159 | PSNR: 21.04 dB | Time: 25.86s
+2025-07-18 16:42:04,754 - INFO - [Epoch 35/50] Train Loss: 0.8417 | Val Loss: 0.8322 | PSNR: 21.02 dB | Time: 25.90s
+2025-07-18 16:42:30,628 - INFO - [Epoch 36/50] Train Loss: 0.8475 | Val Loss: 0.8221 | PSNR: 21.29 dB | Time: 25.87s
+2025-07-18 16:42:56,553 - INFO - [Epoch 37/50] Train Loss: 0.8424 | Val Loss: 0.8484 | PSNR: 20.90 dB | Time: 25.92s
+2025-07-18 16:43:22,434 - INFO - [Epoch 38/50] Train Loss: 0.8314 | Val Loss: 0.8044 | PSNR: 21.12 dB | Time: 25.88s
+2025-07-18 16:43:22,504 - INFO - Model saved to checkpoints/20250718_hist2hist_dist.pth
+2025-07-18 16:43:48,390 - INFO - [Epoch 39/50] Train Loss: 0.8365 | Val Loss: 0.8108 | PSNR: 20.96 dB | Time: 25.89s
+2025-07-18 16:44:14,291 - INFO - [Epoch 40/50] Train Loss: 0.8307 | Val Loss: 0.8183 | PSNR: 21.08 dB | Time: 25.90s
+2025-07-18 16:44:40,167 - INFO - [Epoch 41/50] Train Loss: 0.8269 | Val Loss: 0.8432 | PSNR: 20.80 dB | Time: 25.88s
+2025-07-18 16:45:06,119 - INFO - [Epoch 42/50] Train Loss: 0.8308 | Val Loss: 0.8275 | PSNR: 20.81 dB | Time: 25.95s
+2025-07-18 16:45:32,018 - INFO - [Epoch 43/50] Train Loss: 0.8305 | Val Loss: 0.8465 | PSNR: 20.75 dB | Time: 25.90s
+2025-07-18 16:45:57,937 - INFO - [Epoch 44/50] Train Loss: 0.8368 | Val Loss: 0.8342 | PSNR: 20.85 dB | Time: 25.92s
+2025-07-18 16:46:23,836 - INFO - [Epoch 45/50] Train Loss: 0.8353 | Val Loss: 0.8333 | PSNR: 21.04 dB | Time: 25.90s
+2025-07-18 16:46:49,762 - INFO - [Epoch 46/50] Train Loss: 0.8327 | Val Loss: 0.8216 | PSNR: 21.06 dB | Time: 25.93s
+2025-07-18 16:47:15,655 - INFO - [Epoch 47/50] Train Loss: 0.8352 | Val Loss: 0.8554 | PSNR: 20.81 dB | Time: 25.89s
+2025-07-18 16:47:41,526 - INFO - [Epoch 48/50] Train Loss: 0.8298 | Val Loss: 0.8266 | PSNR: 21.23 dB | Time: 25.87s
+2025-07-18 16:48:07,435 - INFO - [Epoch 49/50] Train Loss: 0.8394 | Val Loss: 0.8214 | PSNR: 21.45 dB | Time: 25.91s
+2025-07-18 16:48:33,309 - INFO - [Epoch 50/50] Train Loss: 0.8316 | Val Loss: 0.8469 | PSNR: 20.78 dB | Time: 25.87s
+2025-07-18 16:48:33,392 - INFO - Loss plot saved to plots/20250718_hist2hist_dist.pth_hist2hist_loss_plot.png

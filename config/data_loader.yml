@@ -3,7 +3,7 @@ batch_size: 32
 num_workers: 4
 shuffle: false
 
-out_mode: mean                          # 'mean' or 'dist'   
+out_mode: dist                          # 'mean' or 'dist'   
 target_samples: 3                       # Number of samples to use for the target histogram            
 
 dataset:

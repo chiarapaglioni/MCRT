@@ -1,13 +1,13 @@
 dataset:
   root_dir: output                      # Raw dataset location
   cached_dir: histograms                # Cached histograms are saved
-  crop_size: 192
+  crop_size: 128
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
   mode: img                            # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
-  virt_size: 3000
+  virt_size: 5000
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
   hist_regeneration: true
@@ -17,7 +17,7 @@ model:
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 5
-  start_filters: 32
+  start_filters: 64
   learning_rate: 1e-4
 
 # General DataLoader settings
@@ -29,5 +29,5 @@ pin_memory: false
 val_split: 0.1  # 10% validation split
 
 # training
-num_epochs: 30
+num_epochs: 50
 save_dir: checkpoints
