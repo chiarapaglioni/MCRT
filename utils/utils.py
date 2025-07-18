@@ -68,10 +68,45 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     plt.show()
 
 
+def hist_to_img(img_tensor):
+    # img_tensor shape: [C, bins, H, W]
+    # Pick one bin to visualize, e.g., mean at bin 0 or 1
+    bin_idx = 0  # or 1 depending on your data
+    img_bin = img_tensor[:, bin_idx, :, :]  # shape: [C, H, W]
+
+    # Permute to [H, W, C] for plotting
+    img_to_plot = img_bin.permute(1, 2, 0).numpy()
+
+    # If C=3 (RGB), this works directly
+    # If C=1, you may want to squeeze or convert to grayscale
+    if img_to_plot.shape[2] == 1:
+        img_to_plot = img_to_plot[:, :, 0]
+
+    return img_to_plot
+
+
+def hist_to_img(img_tensor):
+    # img_tensor shape: [C, bins, H, W]
+    if img_tensor.dim() == 4:
+        # Extract the mean (second last feature)
+        mean_idx = -2
+        img_mean = img_tensor[:, mean_idx, :, :]  # shape: [C, H, W]
+
+        # Permute to [H, W, C] for visualization
+        img_to_plot = img_mean.permute(1, 2, 0).numpy()
+        if img_to_plot.shape[2] == 1:
+            img_to_plot = img_to_plot[:, :, 0]
+    elif img_tensor.dim() == 3:
+        # Already [C, H, W], just permute for plotting
+        img_to_plot = img_tensor.permute(1, 2, 0).numpy()
+        if img_to_plot.shape[2] == 1:
+            img_to_plot = img_to_plot[:, :, 0]
+    else:
+        raise ValueError(f"Unexpected tensor shape {img_tensor.shape}")
+    return img_to_plot
+
+
 def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
-    # batch['input'], batch['noisy'], batch['target'], optionally batch['clean']
-    # preds: model output corresponding to batch['input']
-    
     input_imgs = batch['input'].cpu()
     noisy_imgs = batch['noisy'].cpu()
     target_imgs = batch['target'].cpu()
@@ -80,21 +115,21 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
         clean_imgs = clean_imgs.cpu()
     if preds is not None:
         preds = preds.detach().cpu()
-    
-    # Pick first image in batch for display (or loop a few)
+
     idx = 0
 
     _, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
-    axes[0].imshow(input_imgs[idx].permute(1,2,0))
+
+    axes[0].imshow(hist_to_img(input_imgs[idx]))
     axes[0].set_title("Input")
-    axes[1].imshow(target_imgs[idx].permute(1,2,0))
+    axes[1].imshow(hist_to_img(target_imgs[idx]))
     axes[1].set_title("Target")
-    axes[2].imshow(noisy_imgs[idx].permute(1,2,0))
+    axes[2].imshow(hist_to_img(noisy_imgs[idx]))
     axes[2].set_title("Noisy")
-    axes[3].imshow(preds[idx].permute(1,2,0))
+    axes[3].imshow(hist_to_img(preds[idx]))
     axes[3].set_title("Predicted")
     if clean_imgs is not None:
-        axes[4].imshow(clean_imgs[idx].permute(1,2,0))
+        axes[4].imshow(hist_to_img(clean_imgs[idx]))
         axes[4].set_title("Clean")
 
     for ax in axes:
@@ -221,3 +256,18 @@ def decode_pred_logits(pred_probs):
 
     return expected_rgb
 
+
+def print_histogram_at_pixel(hist_tensor, x, y, used_bins):
+    """
+    Prints the histogram values at a given pixel location (x, y) for each RGB channel.
+
+    Args:
+        hist_tensor (np.ndarray): Histogram tensor with shape [3, B, H, W]
+        x (int): x-coordinate (width direction)
+        y (int): y-coordinate (height direction)
+        used_bins (int): Number of bins used in the histogram
+    """
+    print(f"\n--- Histogram values at pixel ({x}, {y}) ---")
+    for c, color in enumerate(['R', 'G', 'B']):
+        vals = hist_tensor[c, :used_bins, y, x]
+        print(f"{color} channel: {vals}")

@@ -40,4 +40,6 @@ python launch.py data_gen
 python launch.py data_loader
 python launch.py train
 python launch.py eval
+python launch.py train_gen
+python launch.py eval_gen
 ```

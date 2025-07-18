@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 # Datasets
 from dataset.HistImgDataset import HistogramBinomDataset
 from dataset.HistDataset import HistogramDataset
+from utils.utils import print_histogram_at_pixel
 
 # Logger
 import logging
@@ -64,6 +65,8 @@ def test_data_loader(config):
 
             bar_width = 0.25
             bin_positions = np.arange(used_bins)
+
+            print_histogram_at_pixel(hist, x, y, used_bins)
 
             ax.bar(bin_positions - bar_width, r, width=bar_width, color='red', label='R')
             ax.bar(bin_positions, g, width=bar_width, color='green', label='G')

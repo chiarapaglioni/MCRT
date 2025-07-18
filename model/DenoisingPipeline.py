@@ -139,7 +139,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
 
         # Plot the first batch in the first epoch for debugging
         if debug:
-            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, device=device)
+            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
     return total_loss / len(dataloader)
 
@@ -201,6 +201,8 @@ def train_model(config):
     # Optimizer + Loss (MSE for Mean)
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
     criterion = nn.MSELoss()
+    # criterion = nn.L1Loss()
+    # TODO: try combined loss MSE * 0.5 + L1 * 0.5
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")
