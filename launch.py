@@ -48,7 +48,7 @@ def main():
     elif task == "train_gen":
         train_histogram_generator(config)
     
-    # TODO: EVAL (generative)
+    # GEN-EVAL (OK) <3
     elif task == "eval_gen":
         iterative_evaluate(config)
 

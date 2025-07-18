@@ -2,17 +2,19 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+
+import os
 import time
 from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 from skimage.metrics import peak_signal_noise_ratio as psnr
-import logging
 
 from model.UNet import UNet
 from dataset.HistDataset import HistogramDataset
-from utils.utils import plot_images, save_loss_plot, decode_pred_logits
+from utils.utils import save_loss_plot, decode_pred_logits, compute_psnr
 
+import logging
 logger = logging.getLogger(__name__)
 
 
@@ -155,17 +157,18 @@ def train_histogram_generator(config):
             torch.save(model.state_dict(), save_path)
             logger.info(f"Model saved to {save_path}")
 
-    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{model_name}_loss_plot.png")
+    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{model_name}_hist2hist_loss_plot.png")
 
 
 def iterative_evaluate(config, num_samples=4, num_steps=8):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Generating on {device}")
+
     dataset_cfg = config["dataset"]
     n_bins = dataset_cfg["hist_bins"]
 
-    # TODO: avoid regenerating histograms if not needed !
     dataset = HistogramDataset(**dataset_cfg)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=1, num_workers=config['num_workers'], shuffle=False)
 
     model_cfg = config["model"]
     model = UNet(
@@ -181,37 +184,45 @@ def iterative_evaluate(config, num_samples=4, num_steps=8):
     model.load_state_dict(torch.load(config['model_path'], map_location=device))
     model.eval()
 
+    os.makedirs("plots", exist_ok=True)
+
     for idx, batch in enumerate(dataloader):
         if idx >= num_samples:
             break
 
         input_hist = batch["input_hist"].to(device)  # shape: (1, C, bins, H, W)
-        target_img = decode_pred_logits(batch["target_hist"]).to(device)
+        clean_img = batch["clean"].to(device)        # shape: (1, 3, H, W)
 
-        B, C, bins, H, W = input_hist.shape
+        B, C, _, H, W = input_hist.shape
         accumulated_radiance = torch.zeros((B, C, H, W), device=device)
 
-        fig, axs = plt.subplots(1, num_steps + 2, figsize=(4 * (num_steps + 2), 4))
+        _, axs = plt.subplots(1, num_steps + 2, figsize=(4 * (num_steps + 2), 4))
 
         for step in range(num_steps):
             logits = model(input_hist)
-            probs = torch.softmax(logits, dim=2)                   # softmax over bins dimension
-            pred_radiance = decode_pred_logits(probs).clamp(0, 1)  
+            probs = torch.softmax(logits, dim=2)
+            pred_radiance = decode_pred_logits(probs).clamp(0, 1)
 
-            accumulated_radiance += (pred_radiance / num_steps)  # uniform allocation
+            accumulated_radiance += (pred_radiance / num_steps)
 
+            psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
             axs[step].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
-            axs[step].set_title(f"Step {step+1}")
+            axs[step].set_title(f"Step {step+1}\nPSNR: {psnr:.2f} dB")
             axs[step].axis("off")
 
+        # Final Output
+        final_psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
         axs[num_steps].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
-        axs[num_steps].set_title("Final Output")
+        axs[num_steps].set_title(f"Final Output\nPSNR: {final_psnr:.2f} dB")
         axs[num_steps].axis("off")
 
-        # TODO: replace this with clean image + compute PSNR of each frame
-        axs[num_steps + 1].imshow(target_img[0].permute(1, 2, 0).detach().cpu().numpy())
+        # Ground Truth
+        axs[num_steps + 1].imshow(clean_img[0].permute(1, 2, 0).detach().cpu().numpy())
         axs[num_steps + 1].set_title("Ground Truth")
         axs[num_steps + 1].axis("off")
 
         plt.tight_layout()
+        plot_path = os.path.join("plots", f"sample_{idx}_evaluation.png")
+        plt.savefig(plot_path)
         plt.show()
+        print(f"Saved plot to {plot_path}")

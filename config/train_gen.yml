@@ -7,7 +7,7 @@ dataset:
   hist_bins: 16
   mode: hist                            # Options: 'hist' for hist2hist
   data_augmentation: true
-  virt_size: 100
+  virt_size: 800
   clean: true                           # Whether to include 'clean' targets if available
   debug: true
   hist_regeneration: false
@@ -29,5 +29,5 @@ pin_memory: false
 val_split: 0.1  # 10% validation split
 
 # training
-num_epochs: 10
+num_epochs: 20
 save_dir: checkpoints

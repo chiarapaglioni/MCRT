@@ -83,6 +83,10 @@ class HistogramDataset(Dataset):
             # HISTOGRAM CACHING PATHS
             input_hist_cache = None
             target_hist_cache = None
+            if self.cached_dir:
+                input_hist_cache = os.path.join(self.cached_dir, f"{key}_input_hist_{self.hist_bins}bins.npz")
+                target_hist_cache = os.path.join(self.cached_dir, f"{key}_target_hist_{self.hist_bins}bins.npz")
+
             # Split spp1 samples into input and target sets
             assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 

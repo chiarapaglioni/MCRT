@@ -1,13 +1,25 @@
 import os
+import math
 import torch
 import logging
 import tifffile
 import numpy as np
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
+
 
 # Logger
 import logging
 logger = logging.getLogger(__name__)
+
+
+
+# TODO: use custom psnr everywhere!
+def compute_psnr(pred, target):
+    mse = F.mse_loss(pred, target, reduction='mean').item()
+    if mse == 0:
+        return float('inf')
+    return 20 * math.log10(1.0) - 10 * math.log10(mse)
 
 
 def save_tiff(data, file_name):
@@ -56,7 +68,7 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     plt.show()
 
 
-def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, device='cpu'):
+def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
     # batch['input'], batch['noisy'], batch['target'], optionally batch['clean']
     # preds: model output corresponding to batch['input']
     
@@ -72,7 +84,7 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, device='cpu
     # Pick first image in batch for display (or loop a few)
     idx = 0
 
-    fig, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
+    _, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
     axes[0].imshow(input_imgs[idx].permute(1,2,0))
     axes[0].set_title("Input")
     axes[1].imshow(target_imgs[idx].permute(1,2,0))
@@ -198,7 +210,7 @@ def decode_pred_logits(pred_probs):
     Returns:
       expected_rgb: Tensor (B, 3, H, W) with pixel values in [0, 1]
     """
-    B, C, bins, H, W = pred_probs.shape
+    _, _, bins, _, _ = pred_probs.shape
     device = pred_probs.device
 
     # Create bin centers from 0 to 1
