@@ -15,10 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 def compute_psnr(pred, target):
+    # convert to torch if np array is given
+    if isinstance(pred, np.ndarray):
+        pred = torch.from_numpy(pred)
+    if isinstance(target, np.ndarray):
+        target = torch.from_numpy(target)
+
     mse = F.mse_loss(pred, target, reduction='mean').item()
     if mse == 0:
         return float('inf')
     return 20 * math.log10(1.0) - 10 * math.log10(mse)
+
 
 
 def save_tiff(data, file_name):
