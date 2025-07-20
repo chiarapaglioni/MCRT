@@ -2,28 +2,62 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-
 # Datasets
 from dataset.HistImgDataset import HistogramBinomDataset
 from dataset.HistDataset import HistogramDataset
-from utils.utils import print_histogram_at_pixel
 
 # Logger
 import logging
 logger = logging.getLogger(__name__)
 
 
+def print_histogram_at_pixel(hist, x, y, used_bins):
+    print(f"Histogram at pixel ({x}, {y}):")
+    for c, channel in enumerate("RGB"):
+        values = hist[c, :used_bins, y, x]
+        print(f"  {channel}: {values}")
+
+
+def plot_hist_bar(ax, hist, title, x, y, used_bins):
+    r = hist[0, :used_bins, y, x]
+    g = hist[1, :used_bins, y, x]
+    b = hist[2, :used_bins, y, x]
+
+    bar_width = 0.25
+    bin_positions = np.arange(used_bins)
+
+    print_histogram_at_pixel(hist, x, y, used_bins)
+
+    mean = hist[:, -2, y, x]
+    var = hist[:, -1, y, x]
+    print(f"Pixel ({x}, {y}) - Mean: R={mean[0]:.4f}, G={mean[1]:.4f}, B={mean[2]:.4f}")
+    print(f"Pixel ({x}, {y}) - Var:  R={var[0]:.4f}, G={var[1]:.4f}, B={var[2]:.4f}")
+
+    ax.bar(bin_positions - bar_width, r, width=bar_width, color='red', label='R')
+    ax.bar(bin_positions, g, width=bar_width, color='green', label='G')
+    ax.bar(bin_positions + bar_width, b, width=bar_width, color='blue', label='B')
+
+    ax.set_title(title)
+    ax.set_xlabel("Bin")
+    ax.set_ylabel("Counts")
+    ax.set_xticks(bin_positions)
+    ax.legend()
+
+
 def test_data_loader(config):
     dataset_cfg = config['dataset']
-    out_mode = config.get("out_mode", "dist")
-    hist_bins = dataset_cfg.get("hist_bins", 16)
+    out_mode = config.get("out_mode", "mean")
+    mode = dataset_cfg.get("mode", "img")
 
-    # Resolve dataset root
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
-    logger.info(f"Data Loader - Mode: {out_mode} !!")
+    logger.info(f"Data Loader - Mode: {mode.upper()} - Out: {out_mode.upper()} !!")
 
-    # Pick dataset based on out_mode
+    # Validate mode/out_mode combination
+    if out_mode == "dist" and mode == "img":
+        raise ValueError("dist out_mode with img mode is not allowed.")
+
+    # Pick dataset
     if out_mode == "dist":
         dataset = HistogramDataset(**dataset_cfg)
         input_key = 'input_hist'
@@ -49,45 +83,52 @@ def test_data_loader(config):
         if 'clean' in batch and batch['clean'] is not None:
             logger.info(f"Clean shape: {batch['clean'].shape}")
         logger.info(f"Scene: {batch['scene']}")
+        if 'image_mean' in batch and 'image_std' in batch:
+            logger.info(f"Image Mean: {batch['image_mean'].shape}")
+            logger.info(f"Image Std: {batch['image_std'].shape}")
 
-        # Plot histograms for a pixel (center)
-        input_hist = batch[input_key][0].numpy()   # shape: (C, B, H, W)
-        x, y = input_hist.shape[2] // 2, input_hist.shape[3] // 2
-
-        n_plots = 2 if out_mode == "dist" else 1
-        fig, axs = plt.subplots(1, n_plots, figsize=(10, 4))
-        axs = [axs] if n_plots == 1 else axs
-
-        def plot_hist_bar(ax, hist, title, used_bins):
-            r = hist[0, :used_bins, y, x]
-            g = hist[1, :used_bins, y, x]
-            b = hist[2, :used_bins, y, x]
-
-            bar_width = 0.25
-            bin_positions = np.arange(used_bins)
-
-            print_histogram_at_pixel(hist, x, y, used_bins)
-
-            ax.bar(bin_positions - bar_width, r, width=bar_width, color='red', label='R')
-            ax.bar(bin_positions, g, width=bar_width, color='green', label='G')
-            ax.bar(bin_positions + bar_width, b, width=bar_width, color='blue', label='B')
-
-            ax.set_title(title)
-            ax.set_xlabel("Bin")
-            ax.set_ylabel("Counts")
-            ax.set_xticks(bin_positions)
-            ax.legend()
+        input_tensor = batch[input_key][0]
+        target_tensor = batch[target_key][0]
+        x, y = input_tensor.shape[-2] // 2, input_tensor.shape[-1] // 2
 
         if out_mode == "mean":
-            used_bins = hist_bins  # Only the histogram part
-            plot_hist_bar(axs[0], input_hist, "Input Histogram", used_bins)
-        else:  # dist mode
-            used_bins = input_hist.shape[1]  # Full histogram range
-            target_hist = batch[target_key][0].numpy()
-            plot_hist_bar(axs[0], input_hist, "Input Histogram", used_bins)
-            plot_hist_bar(axs[1], target_hist, "Target Histogram", used_bins)
+            if mode == "img":
+                input_img = input_tensor.numpy().transpose(1, 2, 0)
+                target_img = target_tensor.numpy().transpose(1, 2, 0)
 
-        plt.tight_layout()
-        plt.show()
+                fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+                axs[0].imshow(np.clip(input_img, 0, 1))
+                axs[0].set_title("Input Image")
+                axs[0].axis("off")
 
-        break  # Just test one batch
+                axs[1].imshow(np.clip(target_img, 0, 1))
+                axs[1].set_title("Target Image")
+                axs[1].axis("off")
+                plt.tight_layout()
+                plt.show()
+
+            elif mode == "hist":
+                input_hist = input_tensor.numpy()
+                used_bins = input_hist.shape[1] - 2
+                target_img = target_tensor.numpy().transpose(1, 2, 0)
+
+                fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+                plot_hist_bar(axs[0], input_hist, "Input Histogram", x, y, used_bins)
+                axs[1].imshow(np.clip(target_img, 0, 1))
+                axs[1].set_title("Target Image")
+                axs[1].axis("off")
+                plt.tight_layout()
+                plt.show()
+
+        elif out_mode == "dist":
+            input_hist = input_tensor.numpy()
+            target_hist = target_tensor.numpy()
+            used_bins = input_hist.shape[1] - 2
+
+            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+            plot_hist_bar(axs[0], input_hist, "Input Histogram", x, y, used_bins)
+            plot_hist_bar(axs[1], target_hist, "Target Histogram", x, y, used_bins)
+            plt.tight_layout()
+            plt.show()
+
+        break  # only one batch

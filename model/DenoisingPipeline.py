@@ -12,9 +12,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, plot_debug_images
-# Eval
-from skimage.metrics import peak_signal_noise_ratio as psnr
+from utils.utils import plot_images, save_loss_plot, plot_debug_images, compute_psnr, unstandardize_tensor
 
 # Logger
 import logging
@@ -31,45 +29,25 @@ def get_data_loaders(config):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
-    # Load the full dataset
     full_dataset = HistogramBinomDataset(**dataset_cfg)
 
-    # Get lengths for splitting
+    # Split into train/val
     val_ratio = config.get('val_split', 0.2)
     total_len = len(full_dataset)
-    val_len = int(total_len * val_ratio)
+    val_len   = int(total_len * val_ratio)
     train_len = total_len - val_len
+    train_ds, val_ds = random_split(full_dataset, [train_len, val_len])
 
-    # Split by sample index, not scene name
-    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_len, val_len])
+    train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True,  num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=True)
+    val_loader   = DataLoader(val_ds,   batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=False)
 
-    logger.info(f"Train dataset size: {len(train_dataset)} samples")
-    logger.info(f"Val dataset size: {len(val_dataset)} samples")
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['batch_size'],
-        shuffle=True,
-        num_workers=config['num_workers'],
-        pin_memory=config['pin_memory'],
-        drop_last=True
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config['batch_size'],
-        shuffle=False,
-        num_workers=config['num_workers'],
-        pin_memory=config['pin_memory'],
-        drop_last=False
-    )
-
-    train_img = next(iter(train_loader))
-    logger.info(f"Input shape: {train_img['input'].shape}")
-    logger.info(f"Target shape: {train_img['target'].shape}")
-    logger.info(f"Noisy shape: {train_img['noisy'].shape}")
-    if 'clean' in train_img:
-        logger.info(f"Clean shape: {train_img['clean'].shape}")
+    # Log one batch to confirm shapes
+    sample = next(iter(train_loader))
+    logger.info(f"Input shape:  {sample['input'].shape}")
+    logger.info(f"Target shape: {sample['target'].shape}")
+    logger.info(f"Noisy shape:  {sample['noisy'].shape}")
+    if 'clean' in sample and sample['clean'] is not None:
+        logger.info(f"Clean shape:  {sample['clean'].shape}")
 
     return train_loader, val_loader
 
@@ -101,22 +79,19 @@ def get_sample(dataset, idx=0, device='cpu'):
     return input_tensor, target, noisy, clean
 
 
-def evaluate_sample(model, input_tensor, clean_tensor):
+def evaluate_sample(model, input_tensor, clean_tensor, image_mean, image_std):
     with torch.no_grad():
         pred = model(input_tensor).squeeze(0).clamp(0, 1)
         clean = clean_tensor.clamp(0, 1)
 
-        # Fix dimensions
-        if pred.dim() == 3:
-            pred = pred.unsqueeze(0)
-        if clean.dim() == 3:
-            clean = clean.unsqueeze(0)
+        assert pred.dim() == 3 and clean.dim() == 3
 
         logger.info(f"Target shape: {clean.shape}")
         logger.info(f"Pred shape:  {pred.shape}")
         # Calculate PSNR
-        psnr_val = psnr(clean.cpu().numpy(), pred.cpu().numpy(), data_range=1.0)
-    return pred, psnr_val
+        pred_real = unstandardize_tensor(pred, mean=image_mean, std=image_std).clamp(0, 1)       # H, W, 3
+        psnr_val = compute_psnr(pred_real, clean)
+    return pred_real, psnr_val
 
 
 # TRAINING STEP
@@ -139,7 +114,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
 
         # Plot the first batch in the first epoch for debugging
         if debug:
-            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
+            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['image_mean'][batch_idx], image_std=batch['image_std'][batch_idx])
 
     return total_loss / len(dataloader)
 
@@ -153,23 +128,28 @@ def validate_epoch(model, dataloader, criterion, device):
 
     with torch.no_grad():
         for batch in dataloader:
-            hist = batch['input'].to(device)         # B, 3, H, W
-            target = batch['target'].to(device)      # B, 3, H, W
+            hist = batch['input'].to(device)            # B, 3, H, W
+            target = batch['target'].to(device)         # B, 3, H, W
+            clean = batch['clean'].to(device)           # B, 3, H, W
+            image_mean = batch['image_mean'].to(device) 
+            image_std = batch['image_std'].to(device) 
 
-            pred = model(hist).clamp(0, 1)
+            pred = model(hist)                          # B, 3, H, W
             loss = criterion(pred, target)
             total_loss += loss.item()
 
-            # Compute PSNR per image
             for i in range(pred.shape[0]):
-                pred_i = pred[i].cpu().numpy()
-                target_i = target[i].cpu().numpy()
-                total_psnr += psnr(target_i, pred_i, data_range=1.0)
+                # Unstandardize prediction
+                pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i]).clamp(0, 1)       # H, W, 3
+                clean_i = clean[i].clamp(0, 1)
+
+                total_psnr += compute_psnr(pred_i, clean_i)
                 count += 1
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count
     return avg_loss, avg_psnr
+
 
 
 # TRAINING LOOP
@@ -274,22 +254,22 @@ def evaluate_model(config):
     if clean is not None:
         clean = clean.to(device)
     scene = hist_sample["scene"]
+    mean = hist_sample["image_mean"]
+    std = hist_sample["image_std"]
 
     # Load models from checkpoint paths in config
     hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
     img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
 
     # Evaluate models
-    hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)
-    img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
-    init_psnr = psnr(clean.cpu().numpy(), noisy.cpu().numpy(), data_range=1.0)
-    target_psnr = psnr(clean.cpu().numpy(), target.cpu().numpy(), data_range=1.0)
+    hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, image_mean=mean, image_std=std)
+    img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, image_mean=mean, image_std=std)
+    init_psnr = compute_psnr(noisy, clean)
 
     logger.info(f"\nScene: {scene}")
     logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
-    logger.info(f"Target PSNR: {target_psnr:.2f} dB")
     logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
     logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
     # Plot results
-    plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, target_psnr, clean, save_path=f'plots/denoised_{idx}.png')
+    plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean, save_path=f'plots/denoised_{idx}.png')

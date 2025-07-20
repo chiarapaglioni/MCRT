@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 
-# TODO: use custom psnr everywhere!
 def compute_psnr(pred, target):
     mse = F.mse_loss(pred, target, reduction='mean').item()
     if mse == 0:
@@ -34,7 +33,7 @@ def save_tiff(data, file_name):
     logger.info(f"Saved {file_name} with shape {data.shape} <3")
 
 
-def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, target_psnr, clean=None, save_path=None):
+def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean=None, save_path=None):
     """
     Plot denoised images generated from the noise2noise and hist2nosie next to the clean one.
 
@@ -52,7 +51,7 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     
     _, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
     axes[0].imshow(to_img(noisy));          axes[0].set_title(f"Noisy Input - PSNR:  {init_psnr:.2f} dB")
-    axes[1].imshow(to_img(target));         axes[1].set_title(f"Target Sample - PSNR:  {target_psnr:.2f} dB")
+    axes[1].imshow(to_img(target));         axes[1].set_title("Target Sample - PSNR")
     axes[2].imshow(to_img(hist_pred));      axes[2].set_title(f"Hist2Noise Output - PSNR:  {hist_psnr:.2f} dB")
     axes[3].imshow(to_img(img_pred));       axes[3].set_title(f"Noise2Noise Output - PSNR:  {img_psnr:.2f} dB")
     if clean is not None:
@@ -68,45 +67,59 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     plt.show()
 
 
-def hist_to_img(img_tensor):
-    # img_tensor shape: [C, bins, H, W]
-    # Pick one bin to visualize, e.g., mean at bin 0 or 1
-    bin_idx = 0  # or 1 depending on your data
-    img_bin = img_tensor[:, bin_idx, :, :]  # shape: [C, H, W]
+def hist_to_img(img_tensor, mean=None, std=None):
+    """
+    Convert a histogram tensor to an image (mean feature), with optional unstandardization.
 
-    # Permute to [H, W, C] for plotting
-    img_to_plot = img_bin.permute(1, 2, 0).numpy()
+    Args:
+        img_tensor (torch.Tensor): Tensor of shape [C, bins, H, W] or [C, H, W]
+        mean (optional): Per-channel mean for unstandardization
+        std (optional): Per-channel std for unstandardization
 
-    # If C=3 (RGB), this works directly
-    # If C=1, you may want to squeeze or convert to grayscale
-    if img_to_plot.shape[2] == 1:
-        img_to_plot = img_to_plot[:, :, 0]
-
-    return img_to_plot
-
-
-def hist_to_img(img_tensor):
-    # img_tensor shape: [C, bins, H, W]
+    Returns:
+        np.ndarray: Image of shape [H, W, C] or [H, W] for grayscale
+    """
     if img_tensor.dim() == 4:
-        # Extract the mean (second last feature)
-        mean_idx = -2
-        img_mean = img_tensor[:, mean_idx, :, :]  # shape: [C, H, W]
-
-        # Permute to [H, W, C] for visualization
-        img_to_plot = img_mean.permute(1, 2, 0).numpy()
-        if img_to_plot.shape[2] == 1:
-            img_to_plot = img_to_plot[:, :, 0]
+        mean_idx = -2  # Second-to-last bin
+        img = img_tensor[:, mean_idx, :, :]
     elif img_tensor.dim() == 3:
-        # Already [C, H, W], just permute for plotting
-        img_to_plot = img_tensor.permute(1, 2, 0).numpy()
-        if img_to_plot.shape[2] == 1:
-            img_to_plot = img_to_plot[:, :, 0]
+        img = img_tensor
     else:
-        raise ValueError(f"Unexpected tensor shape {img_tensor.shape}")
-    return img_to_plot
+        raise ValueError(f"Unexpected tensor shape: {img_tensor.shape}")
+
+    if mean is not None and std is not None:
+        img = unstandardize_tensor(img, mean, std)
+
+    img_np = img.permute(1, 2, 0).cpu().numpy()
+    if img_np.shape[2] == 1:
+        img_np = img_np[:, :, 0]
+
+    return img_np
 
 
-def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
+def unstandardize_tensor(tensor, mean=None, std=None):
+    """
+    Unstandardizes a tensor using per-channel mean and std.
+
+    Args:
+        tensor (torch.Tensor): Standardized tensor of shape [C, H, W]
+        mean (list, np.ndarray, or torch.Tensor): Per-channel mean
+        std (list, np.ndarray, or torch.Tensor): Per-channel std
+
+    Returns:
+        torch.Tensor: Unstandardized tensor of shape [C, H, W]
+    """
+    import torch
+
+    if isinstance(mean, (list, tuple, np.ndarray)):
+        mean = torch.tensor(mean, dtype=tensor.dtype, device=tensor.device)
+    if isinstance(std, (list, tuple, np.ndarray)):
+        std = torch.tensor(std, dtype=tensor.dtype, device=tensor.device)
+
+    return tensor * std + mean
+
+
+def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, image_mean=None, image_std=None):
     input_imgs = batch['input'].cpu()
     noisy_imgs = batch['noisy'].cpu()
     target_imgs = batch['target'].cpu()
@@ -121,12 +134,12 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
     _, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
 
     axes[0].imshow(hist_to_img(input_imgs[idx]))
-    axes[0].set_title("Input")
+    axes[0].set_title("Input (Standardised)")
     axes[1].imshow(hist_to_img(target_imgs[idx]))
-    axes[1].set_title("Target")
+    axes[1].set_title("Target (Standardised)")
     axes[2].imshow(hist_to_img(noisy_imgs[idx]))
     axes[2].set_title("Noisy")
-    axes[3].imshow(hist_to_img(preds[idx]))
+    axes[3].imshow(hist_to_img(preds[idx], mean=image_mean[idx], std=image_std[idx]))
     axes[3].set_title("Predicted")
     if clean_imgs is not None:
         axes[4].imshow(hist_to_img(clean_imgs[idx]))
@@ -138,63 +151,34 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
     plt.show()
 
 
-def standardize_image(img: np.ndarray, epsilon: float = 1e-8) -> np.ndarray:
-    """
-    Standardize image(s) to zero mean, unit variance per channel.
-    Supports input shapes:
-      - Single image: (H, W, C)
-      - Batch: (N, H, W, C)
-    """
+def normalize_image(img: np.ndarray, epsilon=1e-8, debug=False) -> np.ndarray:
     img = img.astype(np.float32)
-
-    # Batch of images (N, H, W, C)
-    if img.ndim == 4:
-        for i in range(img.shape[0]):
-            for c in range(img.shape[-1]):
-                channel = img[i, ..., c]
-                mean = channel.mean()
-                std = channel.std()
-                img[i, ..., c] = (channel - mean) / (std + epsilon)
     
-    # Single image (H, W, C)
-    elif img.ndim == 3:
-        for c in range(img.shape[-1]):
-            channel = img[..., c]
-            mean = channel.mean()
-            std = channel.std()
-            img[..., c] = (channel - mean) / (std + epsilon)
-    else:
-        raise ValueError("Input must be 3D or 4D ndarray")
-
-    return img
-
-
-def normalize_image(img: np.ndarray, epsilon=1e-8) -> np.ndarray:
-    """
-    Min-max normalize image(s) to [0,1] per channel.
-    Supports input shape:
-      - Single image: (H, W, C)
-      - Batch: (N, H, W, C)
-    """
-    img = img.astype(np.float32)
     if img.ndim == 3:
-        # Single image (H, W, C)
         for c in range(img.shape[-1]):
             channel = img[..., c]
             min_val = channel.min()
             max_val = channel.max()
-            img[..., c] = (channel - min_val) / (max_val - min_val + epsilon)
+            normalized = (channel - min_val) / (max_val - min_val + epsilon)
+            if debug:
+                print(f"[normalize_image] Channel {c} min before norm: {min_val}, max before norm: {max_val}")
+                print(f"[normalize_image] Channel {c} min after norm: {normalized.min()}, max after norm: {normalized.max()}")
+            img[..., c] = normalized
+
     elif img.ndim == 4:
-        # Batch of images (N, H, W, C)
         for i in range(img.shape[0]):
             for c in range(img.shape[-1]):
                 channel = img[i, ..., c]
                 min_val = channel.min()
                 max_val = channel.max()
-                img[i, ..., c] = (channel - min_val) / (max_val - min_val + epsilon)
+                normalized = (channel - min_val) / (max_val - min_val + epsilon)
+                if debug:
+                    print(f"[normalize_image] Image {i} Channel {c} min before norm: {min_val}, max before norm: {max_val}")
+                    print(f"[normalize_image] Image {i} Channel {c} min after norm: {normalized.min()}, max after norm: {normalized.max()}")
+                img[i, ..., c] = normalized
+
     else:
         raise ValueError("Input must be 3D or 4D ndarray")
-
     return img
 
 
@@ -271,3 +255,43 @@ def print_histogram_at_pixel(hist_tensor, x, y, used_bins):
     for c, color in enumerate(['R', 'G', 'B']):
         vals = hist_tensor[c, :used_bins, y, x]
         print(f"{color} channel: {vals}")
+
+
+def compute_global_mean_std(root_dir, low_spp):
+    all_pixels = []
+
+    # Iterate scenes and load spp1 images
+    for subdir in sorted(os.listdir(root_dir)):
+        full_subdir = os.path.join(root_dir, subdir)
+        if not os.path.isdir(full_subdir):
+            continue
+        for fname in os.listdir(full_subdir):
+            if fname.endswith(f"spp1x{low_spp}.tiff"):
+                path = os.path.join(full_subdir, fname)
+                img = tifffile.imread(path)  # (low_spp, H, W, 3)
+                # Reshape to (-1, 3) and append
+                pixels = img.reshape(-1, 3)
+                all_pixels.append(pixels)
+
+    all_pixels = np.concatenate(all_pixels, axis=0)  # shape (N_pixels, 3)
+
+    mean = np.mean(all_pixels, axis=0)  # (3,)
+    std = np.std(all_pixels, axis=0)    # (3,)
+
+    return torch.tensor(mean, dtype=torch.float32), torch.tensor(std, dtype=torch.float32)
+
+
+def standardize_per_image(tensor):
+    """
+    Standardizes N images of shape (C, H, W) rendered at 1spp and returns their channel mean and std
+
+    Parameters: 
+        tensor: (N, C, H, W)
+    Returns:
+        standardized tensor, means, std (shape (3, 1, 1))
+    """
+    # tensor: (N, C, H, W)
+    mean = tensor.mean(dim=(0, 2, 3)).view(-1, 1, 1)  # (3, 1, 1)
+    std = tensor.std(dim=(0, 2, 3)).view(-1, 1, 1)    # (3, 1, 1)
+    standardized = (tensor - mean[None]) / (std[None] + 1e-8)
+    return standardized, mean, std

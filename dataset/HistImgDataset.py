@@ -6,7 +6,7 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
-from utils.utils import standardize_image, normalize_image
+from utils.utils import standardize_per_image
 
 # Logger
 import logging
@@ -33,6 +33,8 @@ class HistogramBinomDataset(Dataset):
         self.device = device or torch.device("cpu")
         self.hist_regeneration = hist_regeneration
 
+        self.image_mean_std = {}  # add this in __init__
+
         self.spp1_images = {}
         self.hist_features = {}
         self.noisy_images = {}
@@ -51,7 +53,7 @@ class HistogramBinomDataset(Dataset):
                 continue
             for fname in os.listdir(full_subdir):
                 if fname.endswith(f"spp1x{self.low_spp}.tiff"):
-                    key = fname.split(f"_spp")[0]
+                    key = fname.split("_spp")[0]
                     scene_keys.append((key, full_subdir))
 
         all_scenes = sorted(set(key for key, _ in scene_keys))
@@ -74,11 +76,14 @@ class HistogramBinomDataset(Dataset):
 
             assert spp1_file and noisy_file, f"Missing files for scene: {key} in {folder}"
             
-            # Load Noisy Images
+            # Load spp1xN images
             spp1_path = os.path.join(folder, spp1_file)
+            spp1_img = tifffile.imread(spp1_path)               # (low_spp, H, W, 3)
+            
+            # Load sppN image
             noisy_path = os.path.join(folder, noisy_file)
-            spp1_img = tifffile.imread(spp1_path)       # (low_spp, H, W, 3)
-            noisy_img = tifffile.imread(noisy_path)     # (H, W, 3)
+            noisy_img = tifffile.imread(noisy_path)             # (H, W, 3)
+            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()
 
             self.scene_paths[key] = folder
             
@@ -86,7 +91,6 @@ class HistogramBinomDataset(Dataset):
             if self.clean and clean_file:
                 clean_path = os.path.join(folder, clean_file)
                 clean_img = tifffile.imread(clean_path)
-                clean_img = standardize_image(clean_img)
                 self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()
 
             # Select random input(N-1)/target(1) indices for this scene
@@ -115,22 +119,21 @@ class HistogramBinomDataset(Dataset):
                     hist_sum = np.sum(hist, axis=-1, keepdims=True)
                     hist /= (hist_sum + 1e-8)
 
-                    # Use normalized mean and variance features
-                    input_samples_norm = standardize_image(input_samples_raw.copy())
-                    mean = input_samples_norm.mean(axis=0)[..., None]
-                    var = input_samples_norm.var(axis=0)[..., None]
-
-                    features = np.concatenate([hist, mean, var], axis=-1)
-                    self.hist_features[key] = features
+                    self.hist_features[key] = hist
                     if cache_path:
-                        np.savez_compressed(cache_path, features=features)
+                        np.savez_compressed(cache_path, features=hist)
 
             # NORMALIZATION
-            spp1_img = standardize_image(spp1_img)
-            noisy_img = standardize_image(noisy_img)
+            # Convert to tensor with channels first: (N, H, W, 3) -> (N, 3, H, W)
+            spp1_tensor = torch.from_numpy(spp1_img).permute(0, 3, 1, 2).float()
 
-            self.spp1_images[key] = spp1_img
-            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()
+            spp1_tensor_std, mean, std = standardize_per_image(spp1_tensor)
+            self.spp1_images[key] = spp1_tensor_std
+
+            # Later, store per scene:
+            self.image_mean_std[key] = (mean, std)
+
+
 
     def __len__(self):
         return self.virt_size
@@ -143,18 +146,32 @@ class HistogramBinomDataset(Dataset):
 
         # Get Input and Target Samples
         input_idx, target_idx = self.scene_sample_indices[scene]
-        input_samples = spp1_img[input_idx]
-        target_sample = spp1_img[target_idx]
+        input_samples = spp1_img[input_idx]  # tensor: (N-1, C, H, W)
+        target_sample = spp1_img[target_idx] # tensor: (C, H, W)
 
-        # LOAD DATA
+        mean, std = self.image_mean_std[scene]
+
         if self.mode == 'hist':
-            features = self.hist_features[scene]
-            input_tensor = torch.from_numpy(np.transpose(features, (2, 3, 0, 1))).float()
-        else:
-            input_avg = input_samples.mean(axis=0)
-            input_tensor = torch.from_numpy(input_avg).permute(2, 0, 1).float()
+            features = self.hist_features[scene]  # (H, W, 3, bins)
 
-        target_tensor = torch.from_numpy(target_sample).permute(2, 0, 1).float()
+            # Compute on-the-fly mean & var from input_samples
+            input_samples_unstd = input_samples * std + mean
+            input_samples_np = input_samples_unstd.permute(0, 2, 3, 1).numpy()
+
+            mean_img = input_samples_np.mean(axis=0, keepdims=True)[..., None]  # (1, H, W, 3, 1)
+            var_img = input_samples_np.var(axis=0, keepdims=True)[..., None]
+
+            mean_img = mean_img.squeeze(0)  # (H, W, 3, 1)
+            var_img = var_img.squeeze(0)
+
+            concat_features = np.concatenate([features, mean_img, var_img], axis=-1)  # (H, W, 3, bins+2)
+            input_tensor = torch.from_numpy(np.transpose(concat_features, (2, 3, 0, 1))).float()  # (3, bins+2, H, W)
+
+        else:
+            input_avg = input_samples.mean(dim=0)  # average (3, H, W)
+            input_tensor = input_avg
+
+        target_tensor = target_sample
 
         # CROP
         if self.crop_size:
@@ -193,5 +210,7 @@ class HistogramBinomDataset(Dataset):
             "noisy": noisy_tensor,
             "clean": clean_tensor if clean_tensor is not None else None,
             "scene": scene,
-            "crop_coords": (i, j, h, w) if self.crop_size else None
+            "crop_coords": (i, j, h, w) if self.crop_size else None,
+            "image_mean": mean,  # shape (3, 1, 1)
+            "image_std": std,    # shape (3, 1, 1)
         }
