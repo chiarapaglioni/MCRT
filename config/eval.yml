@@ -1,21 +1,21 @@
 # Evaluation Parameters
 eval:
-  idx: 38              # Sample index to evaluate
-  hist_checkpoint: checkpoints/2025-07-17_192_hist2noise_mean_bins16.pth
-  img_checkpoint: checkpoints/2025-07-17_192_noise2noise_mean_binsimg.pth
+  idx: 92              # Sample index to evaluate
+  hist_checkpoint: checkpoints/2025-07-20_hist2noise_mean_bins16.pth
+  img_checkpoint: checkpoints/2025-07-20_noise2noise_mean_binsimg.pth
 
 model:
   in_channels: 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 5
+  depth: 3
   start_filters: 32
   learning_rate: 1e-4
 
 dataset:
   root_dir: output                      # Raw dataset location
   cached_dir: histograms                # Cached histograms are saved
-  crop_size: 192
+  crop_size: 128
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
