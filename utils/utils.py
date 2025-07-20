@@ -158,7 +158,7 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, image_mean=
     plt.show()
 
 
-def normalize_image(img: np.ndarray, epsilon=1e-8, debug=False) -> np.ndarray:
+def normalize_image(img: np.ndarray, epsilon=1e-8, debug=False):
     img = img.astype(np.float32)
     
     if img.ndim == 3:
@@ -213,6 +213,31 @@ def save_loss_plot(train_losses, val_losses, save_dir, filename="loss_plot.png",
     plt.savefig(save_path)
     plt.close()
     logger.info(f"Loss plot saved to {save_path}")
+
+
+def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
+    """
+    Saves the PSNR plot over epochs.
+    
+    Args:
+        psnr_values (list): List of PSNR values (floats).
+        save_dir (str): Directory to save the plot.
+        filename (str): Name of the output PNG file.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, filename)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(psnr_values, marker='o', label='PSNR')
+    plt.title("Validation PSNR over Epochs")
+    plt.xlabel("Epoch")
+    plt.ylabel("PSNR (dB)")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(path)
+    plt.close()
+
+    logger.info(f"Saved PSNR plot to {path}")
 
 
 def setup_logger(logfile='run.log'):

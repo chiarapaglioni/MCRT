@@ -12,7 +12,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, plot_debug_images, compute_psnr, unstandardize_tensor
+from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, unstandardize_tensor
 
 # Logger
 import logging
@@ -201,6 +201,7 @@ def train_model(config):
     # store loss values for plot
     train_losses = []
     val_losses = []
+    psnr_values = []
 
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
@@ -210,6 +211,7 @@ def train_model(config):
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
+        psnr_values.append(val_psnr)
 
         epoch_time = time.time() - start_time
         logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] "
@@ -223,6 +225,7 @@ def train_model(config):
         
     # save plot loss
     save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_loss_plot.png")
+    save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_psnr_plot.png")
 
 
 
