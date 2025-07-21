@@ -13,19 +13,33 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 def compute_psnr(pred, target):
-    # convert to torch if np array is given
+    '''
+    Computes PSNR over images with dynamic range
+    '''
+    # Convert to torch if needed
     if isinstance(pred, np.ndarray):
         pred = torch.from_numpy(pred)
     if isinstance(target, np.ndarray):
         target = torch.from_numpy(target)
 
+    # Ensure float32 for precision
+    pred = pred.float()
+    target = target.float()
+
     mse = F.mse_loss(pred, target, reduction='mean').item()
     if mse == 0:
         return float('inf')
-    return 20 * math.log10(1.0) - 10 * math.log10(mse)
 
+    # Compute dynamic range (min/max over the target)
+    max_val = target.max().item()
+    min_val = target.min().item()
+    dynamic_range = max_val - min_val
+
+    if dynamic_range == 0:
+        return float('inf')  # Avoid division by zero
+
+    return 20 * math.log10(dynamic_range) - 10 * math.log10(mse)
 
 
 def save_tiff(data, file_name):
@@ -156,37 +170,6 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, image_mean=
         ax.axis('off')
     plt.suptitle(f"Epoch {epoch} Batch {batch_idx}")
     plt.show()
-
-
-def normalize_image(img: np.ndarray, epsilon=1e-8, debug=False):
-    img = img.astype(np.float32)
-    
-    if img.ndim == 3:
-        for c in range(img.shape[-1]):
-            channel = img[..., c]
-            min_val = channel.min()
-            max_val = channel.max()
-            normalized = (channel - min_val) / (max_val - min_val + epsilon)
-            if debug:
-                print(f"[normalize_image] Channel {c} min before norm: {min_val}, max before norm: {max_val}")
-                print(f"[normalize_image] Channel {c} min after norm: {normalized.min()}, max after norm: {normalized.max()}")
-            img[..., c] = normalized
-
-    elif img.ndim == 4:
-        for i in range(img.shape[0]):
-            for c in range(img.shape[-1]):
-                channel = img[i, ..., c]
-                min_val = channel.min()
-                max_val = channel.max()
-                normalized = (channel - min_val) / (max_val - min_val + epsilon)
-                if debug:
-                    print(f"[normalize_image] Image {i} Channel {c} min before norm: {min_val}, max before norm: {max_val}")
-                    print(f"[normalize_image] Image {i} Channel {c} min after norm: {normalized.min()}, max after norm: {normalized.max()}")
-                img[i, ..., c] = normalized
-
-    else:
-        raise ValueError("Input must be 3D or 4D ndarray")
-    return img
 
 
 def save_loss_plot(train_losses, val_losses, save_dir, filename="loss_plot.png", title="Training and Validation Loss"):
