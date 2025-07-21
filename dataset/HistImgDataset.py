@@ -127,13 +127,16 @@ class HistogramBinomDataset(Dataset):
             # Convert to tensor with channels first: (N, H, W, 3) -> (N, 3, H, W)
             spp1_tensor = torch.from_numpy(spp1_img).permute(0, 3, 1, 2).float()
 
-            spp1_tensor_std, mean, std = standardize_per_image(spp1_tensor)
-            self.spp1_images[key] = spp1_tensor_std
-
-            # Later, store per scene:
-            self.image_mean_std[key] = (mean, std)
-
-
+            if self.mode == 'hist':
+                # Only standardize and save mean/std for hist mode
+                spp1_tensor_std, mean, std = standardize_per_image(spp1_tensor)
+                self.spp1_images[key] = spp1_tensor_std
+                self.image_mean_std[key] = (mean, std)
+            else:
+                # Store raw for img mode; normalization will be done dynamically
+                self.spp1_images[key] = spp1_tensor
+                # TODO: to be removed
+                self.image_mean_std[key] = (None, None)
 
     def __len__(self):
         return self.virt_size
@@ -144,34 +147,47 @@ class HistogramBinomDataset(Dataset):
         noisy_tensor = self.noisy_images[scene]
         clean_tensor = self.clean_images.get(scene, None)
 
-        # Get Input and Target Samples
         input_idx, target_idx = self.scene_sample_indices[scene]
-        input_samples = spp1_img[input_idx]  # tensor: (N-1, C, H, W)
-        target_sample = spp1_img[target_idx] # tensor: (C, H, W)
+        input_samples = spp1_img[input_idx]  # (N-1, C, H, W)
+        target_sample = spp1_img[target_idx] # (C, H, W)
 
         mean, std = self.image_mean_std[scene]
 
         if self.mode == 'hist':
             features = self.hist_features[scene]  # (H, W, 3, bins)
 
-            # Compute on-the-fly mean & var from input_samples
-            input_samples_unstd = input_samples * std + mean
-            input_samples_np = input_samples_unstd.permute(0, 2, 3, 1).numpy()
-
-            mean_img = input_samples_np.mean(axis=0, keepdims=True)[..., None]  # (1, H, W, 3, 1)
+            input_samples_np = input_samples.permute(0, 2, 3, 1).numpy()  # (N, H, W, 3)
+            mean_img = input_samples_np.mean(axis=0, keepdims=True)[..., None]
             var_img = input_samples_np.var(axis=0, keepdims=True)[..., None]
 
-            mean_img = mean_img.squeeze(0)  # (H, W, 3, 1)
+            mean_img = mean_img.squeeze(0)
             var_img = var_img.squeeze(0)
 
             concat_features = np.concatenate([features, mean_img, var_img], axis=-1)  # (H, W, 3, bins+2)
             input_tensor = torch.from_numpy(np.transpose(concat_features, (2, 3, 0, 1))).float()  # (3, bins+2, H, W)
 
-        else:
-            input_avg = input_samples.mean(dim=0)  # average (3, H, W)
-            input_tensor = input_avg
+            target_tensor = target_sample  # no standardisation in hist mode
 
-        target_tensor = target_sample
+        else:  
+            # ----------- 'img' mode with cuboid standardisation -----------
+            input_samples_img = input_samples.permute(0, 2, 3, 1)   # (N-1, H, W, 3)
+            input_cuboid = input_samples_img.reshape(-1, 3)         # (N-1 * H * W, 3)
+
+            cuboid_mean = input_cuboid.mean(dim=0)
+            cuboid_std = input_cuboid.std(dim=0) + 1e-8
+
+            norm_cuboid = (input_cuboid - cuboid_mean) / cuboid_std
+            norm_img = norm_cuboid.view(input_samples.shape[0], input_samples.shape[2], input_samples.shape[3], 3)
+            norm_img = norm_img.permute(0, 3, 1, 2)  # (N-1, 3, H, W)
+
+            input_tensor = norm_img.mean(dim=0)      # (3, H, W)
+
+            cuboid_mean = cuboid_mean.view(3, 1, 1)
+            cuboid_std = cuboid_std.view(3, 1, 1)
+            mean = cuboid_mean
+            std = cuboid_std
+
+            target_tensor = (target_sample - cuboid_mean) / cuboid_std  # (3, H, W)
 
         # CROP
         if self.crop_size:
@@ -180,25 +196,22 @@ class HistogramBinomDataset(Dataset):
             else:
                 i, j, h, w = crop_coords
 
-            input_tensor = input_tensor[:, :, i:i+h, j:j+w] if self.mode == 'hist' else input_tensor[:, i:i+h, j:j+w]
-            target_tensor = target_tensor[:, i:i+h, j:j+w]
-            noisy_tensor = noisy_tensor[:, i:i+h, j:j+w]
+            input_tensor = input_tensor[..., i:i+h, j:j+w]
+            target_tensor = target_tensor[..., i:i+h, j:j+w]
+            noisy_tensor = noisy_tensor[..., i:i+h, j:j+w]
             if clean_tensor is not None:
-                clean_tensor = clean_tensor[:, i:i+h, j:j+w]
+                clean_tensor = clean_tensor[..., i:i+h, j:j+w]
 
         # DATA AUGMENTATION
         if self.data_augmentation:
-            # Random horizontal flip
             if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[-1])
+                input_tensor = torch.flip(input_tensor, dims=[-1])    # horizontal flip
                 target_tensor = torch.flip(target_tensor, dims=[-1])
                 noisy_tensor = torch.flip(noisy_tensor, dims=[-1])
                 if clean_tensor is not None:
                     clean_tensor = torch.flip(clean_tensor, dims=[-1])
-
-            # Random vertical flip
             if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[-2])
+                input_tensor = torch.flip(input_tensor, dims=[-2])    # vertical flip
                 target_tensor = torch.flip(target_tensor, dims=[-2])
                 noisy_tensor = torch.flip(noisy_tensor, dims=[-2])
                 if clean_tensor is not None:
@@ -211,6 +224,6 @@ class HistogramBinomDataset(Dataset):
             "clean": clean_tensor if clean_tensor is not None else None,
             "scene": scene,
             "crop_coords": (i, j, h, w) if self.crop_size else None,
-            "image_mean": mean,  # shape (3, 1, 1)
-            "image_std": std,    # shape (3, 1, 1)
+            "image_mean": mean,
+            "image_std": std
         }
