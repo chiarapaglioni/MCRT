@@ -1,8 +1,9 @@
 # Evaluation Parameters
 eval:
-  idx: 92              # Sample index to evaluate
-  hist_checkpoint: checkpoints/2025-07-20_hist2noise_mean_bins16.pth
-  img_checkpoint: checkpoints/2025-07-20_noise2noise_mean_binsimg.pth
+  # idx: 27              # Sample index to evaluate
+  n_eval_samples: 10
+  hist_checkpoint: checkpoints/2025-07-21_hist2noise_mean_bins16.pth
+  img_checkpoint: checkpoints/2025-07-21_noise2noise_mean_binsimg.pth
 
 model:
   in_channels: 3

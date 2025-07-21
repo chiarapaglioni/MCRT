@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 # Path
 import os
+import random
 from pathlib import Path
 # Time
 import time
@@ -37,6 +38,10 @@ def get_data_loaders(config):
     val_len   = int(total_len * val_ratio)
     train_len = total_len - val_len
     train_ds, val_ds = random_split(full_dataset, [train_len, val_len])
+
+    logger.info(f"Total dataset size: {total_len}")
+    logger.info(f"Training set size:  {len(train_ds)}")
+    logger.info(f"Validation set size: {len(val_ds)}")
 
     train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True,  num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=True)
     val_loader   = DataLoader(val_ds,   batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=False)
@@ -114,7 +119,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
 
         # Plot the first batch in the first epoch for debugging
         if debug:
-            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['image_mean'][batch_idx], image_std=batch['image_std'][batch_idx])
+            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['image_mean'], image_std=batch['image_std'])
 
     return total_loss / len(dataloader)
 
@@ -180,9 +185,9 @@ def train_model(config):
 
     # Optimizer + Loss (MSE for Mean)
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    # TODO: try combined loss MSE * 0.5 + L1 * 0.5
     criterion = nn.MSELoss()
     # criterion = nn.L1Loss()
-    # TODO: try combined loss MSE * 0.5 + L1 * 0.5
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -218,6 +223,7 @@ def train_model(config):
             f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PSNR: {val_psnr:.2f} dB "
             f"| Time: {epoch_time:.2f}s")
 
+        # TODO: choose best mode based on loss and PSNR
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
@@ -233,46 +239,58 @@ def evaluate_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Evaluating on device: {device}")
 
-    # Read evaluation parameters from config
-    idx = config["eval"]["idx"]
+    # Number of random samples to evaluate
+    n_samples = config["eval"].get("n_eval_samples", 5)
 
     # Dataset config
     dataset_cfg = config["dataset"]
 
-    # Load datasets using config values
+    # Load datasets
     hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
     img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, hist_regeneration=False)
 
-    # Get samples
-    hist_sample = hist_dataset.__getitem__(idx)
-    crop_coords = hist_sample["crop_coords"]
-    img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
+    # Randomly select n indices
+    total_samples = len(hist_dataset)
+    selected_indices = random.sample(range(total_samples), n_samples)
+    logger.info(f"Randomly selected indices: {selected_indices}")
 
-    # Prepare inputs for model
-    hist_input = hist_sample["input"].unsqueeze(0).to(device)
-    img_input = img_sample["input"].unsqueeze(0).to(device)
-    target = hist_sample["target"].to(device)
-    noisy = hist_sample["noisy"].to(device)
-    clean = hist_sample.get("clean", None)
-    if clean is not None:
-        clean = clean.to(device)
-    scene = hist_sample["scene"]
-    mean = hist_sample["image_mean"]
-    std = hist_sample["image_std"]
-
-    # Load models from checkpoint paths in config
+    # Load models
     hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
     img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
 
-    # Evaluate models
-    hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, image_mean=mean, image_std=std)
-    img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, image_mean=mean, image_std=std)
-    init_psnr = compute_psnr(noisy, clean)
+    for idx in selected_indices:
+        logger.info(f"\nEvaluating index: {idx}")
 
-    logger.info(f"\nScene: {scene}")
-    logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
-    logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
-    logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
+        # Get samples
+        hist_sample = hist_dataset.__getitem__(idx)
+        crop_coords = hist_sample["crop_coords"]
+        img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
 
-    # Plot results
-    plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean, save_path=f'plots/denoised_{idx}.png')
+        # Prepare inputs
+        hist_input = hist_sample["input"].unsqueeze(0).to(device)
+        img_input = img_sample["input"].unsqueeze(0).to(device)
+        target = hist_sample["target"].to(device)
+        noisy = hist_sample["noisy"].to(device)
+        clean = hist_sample.get("clean", None)
+        if clean is not None:
+            clean = clean.to(device)
+        scene = hist_sample["scene"]
+        mean = hist_sample["image_mean"]
+        std = hist_sample["image_std"]
+
+        # Evaluate models
+        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, image_mean=mean, image_std=std)
+        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, image_mean=mean, image_std=std)
+        init_psnr = compute_psnr(noisy, clean)
+
+        logger.info(f"Scene: {scene}")
+        logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
+        logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
+        logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
+
+        # Save plots
+        plot_images(
+            noisy, init_psnr, hist_pred, hist_psnr,
+            img_pred, img_psnr, target, clean,
+            save_path=f'plots/denoised_{idx}.png'
+        )
