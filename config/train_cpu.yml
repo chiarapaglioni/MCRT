@@ -5,29 +5,31 @@ dataset:
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
-  mode: hist                             # Options: 'hist' for hist2noise or 'img' for noise2noise
+  mode: img                             # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
-  virt_size: 200
+  virt_size: 300
   clean: true                           # Whether to include 'clean' targets if available
-  debug: false
+  debug: true
   hist_regeneration: false
+  supervised: false
 
 model:
   in_channels: 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 3
-  start_filters: 32
+  start_filters: 32  
   learning_rate: 1e-4
 
 # General DataLoader settings
-batch_size: 16
+batch_size: 32
 num_workers: 2
 shuffle: true
 pin_memory: false
+standardisation: global     # TODO: add support to toggle on/off log norm
 
 val_split: 0.1  # 10% validation split
 
 # training
-num_epochs: 10
+num_epochs: 15
 save_dir: checkpoints

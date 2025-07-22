@@ -19,3 +19,4 @@ dataset:
   clean: true                             # Whether to include 'clean' targets if available
   debug: false
   hist_regeneration: false
+  supervised: true

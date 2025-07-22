@@ -6,6 +6,7 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
+from utils.utils import standardize_per_image, boxcox_transform, boxcox_and_standardize
 
 import logging
 logger = logging.getLogger(__name__)
@@ -41,11 +42,11 @@ class HistogramBinomDataset(Dataset):
         else:
             logger.info("Self-Supervised (noise2noise) mode")
 
-        self.spp1_images = {}           # (scene) -> tensor (N, 3, H, W)
-        self.hist_features = {}         # (scene) -> np.array (H, W, 3, bins)
-        self.noisy_images = {}          # (scene) -> tensor (3, H, W)
-        self.clean_images = {}          # (scene) -> tensor (3, H, W)
-        self.scene_paths = {}           # (scene) -> folder path
+        self.spp1_images = {}     # (scene) -> tensor (N, 3, H, W)
+        self.hist_features = {}   # (scene) -> np.array (H, W, 3, bins)
+        self.noisy_images = {}    # (scene) -> tensor (3, H, W)
+        self.clean_images = {}    # (scene) -> tensor (3, H, W)
+        self.scene_paths = {}     # (scene) -> folder path
         self.scene_sample_indices = {}  # (scene) -> (list of input idx, target idx)
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
@@ -129,30 +130,96 @@ class HistogramBinomDataset(Dataset):
                         np.savez_compressed(cache_path, features=hist)
 
             # Convert spp1 images to tensor (N, 3, H, W)
-            spp1_array = np.transpose(spp1_img, (0, 3, 1, 2)).astype(np.float32)  # (N, 3, H, W)
-            self.spp1_images[key] = spp1_array
+            spp1_tensor = torch.from_numpy(spp1_img).permute(0, 3, 1, 2).float()  # (N, 3, H, W)
+
+            if self.mode == 'hist':
+                # Standardize per image for hist mode
+                spp1_tensor_std, mean, std = standardize_per_image(spp1_tensor)  # same shape, mean/std: (3, 1, 1)
+                self.spp1_images[key] = spp1_tensor_std
+                self.image_mean_std[key] = (mean, std)
+            else:
+                # Store raw tensor, normalization will be dynamic for img mode
+                self.spp1_images[key] = spp1_tensor
+                self.image_mean_std[key] = (None, None)
 
     def __len__(self):
         return self.virt_size
 
     def __getitem__(self, idx, crop_coords=None):
-        scene = random.choice(self.scene_names)
-        spp1_img = self.spp1_images[scene]  # (low_spp, H, W, 3)
-        noisy_tensor = self.noisy_images[scene]  # (3, H, W)
-        clean_tensor = self.clean_images.get(scene, None)
+        scene = self.scene_names[idx % len(self.scene_names)]
+
+        spp1_img = self.spp1_images[scene]           # (N, 3, H, W)
+        noisy_tensor = self.noisy_images[scene]      # (3, H, W)
+        clean_tensor = self.clean_images.get(scene, None)  # (3, H, W) or None
 
         input_idx, target_idx = self.scene_sample_indices[scene]
         input_samples = spp1_img[input_idx]           # (N-1, 3, H, W)
         target_sample = spp1_img[target_idx]          # (3, H, W)
 
-        input_avg = input_samples.mean(axis=0)  # (3, H, W)
-        input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
-        
-        # NORMALISE avg image
-        input_avg = np.log1p(input_avg)
-        
-        target_sample = np.log1p(target_sample) # shape: (3, H, W)
-        target_tensor = torch.from_numpy(target_sample).float()  # shape: (3, H, W)
+        # Per Scene Mean --> Currently not used
+        # mean, std = self.image_mean_std[scene]
+
+        # Hyperparameters for boxcox transform
+        lambda_val = 0.5
+        epsilon = 1e-6
+
+        if self.mode == 'hist':
+            features = self.hist_features[scene]  # (H, W, 3, bins)
+
+            input_np = input_samples.permute(0, 2, 3, 1).numpy()
+            mean_img = input_np.mean(axis=0)   # (H, W, 3)
+            var_img = input_np.var(axis=0)     # (H, W, 3)
+
+            mean_std_norm, mean_mean, mean_std = boxcox_and_standardize(
+                torch.from_numpy(mean_img).float(), global_mean=self.global_mean, global_std=self.global_std
+            )
+            var_std_norm, var_mean, var_std = boxcox_and_standardize(
+                torch.from_numpy(var_img).float(), global_mean=self.global_mean, global_std=self.global_std
+            )
+
+            mean_std_norm = mean_std_norm.numpy()[..., None]
+            var_std_norm = var_std_norm.numpy()[..., None]
+
+            concat_features = np.concatenate([features, mean_std_norm, var_std_norm], axis=-1)
+            input_tensor = torch.from_numpy(np.transpose(concat_features, (2, 3, 0, 1))).float()
+
+            target_tensor, _, _ = boxcox_and_standardize(
+                target_sample, global_mean=self.global_mean, global_std=self.global_std
+            )
+
+            mean = mean_mean
+            std = mean_std
+
+        else:
+            input_bc = boxcox_transform(input_samples, lmbda=lambda_val, epsilon=epsilon)
+            input_cuboid = input_bc.permute(0, 2, 3, 1).reshape(-1, 3)
+
+            # global mean
+            if self.global_mean is not None and self.global_std is not None:
+                cuboid_mean = self.global_mean.view(3)
+                cuboid_std = self.global_std.view(3) + 1e-8
+            # cuboid mean over the batch
+            else:
+                cuboid_mean = input_cuboid.mean(dim=0)
+                cuboid_std = input_cuboid.std(dim=0) + 1e-8
+
+            norm = (input_cuboid - cuboid_mean) / cuboid_std
+            norm_img = norm.view(input_samples.shape[0], input_samples.shape[2], input_samples.shape[3], 3)
+            norm_img = norm_img.permute(0, 3, 1, 2)  # (N-1, 3, H, W)
+
+            # average tensor for image mode
+            input_tensor = norm_img.mean(dim=0)
+            mean = cuboid_mean.view(3, 1, 1)
+            std = cuboid_std.view(3, 1, 1)
+
+            # TODO: try only tonemapping input + using MSE realtive 
+            # Boxcox transform target sample and normalize
+            if self.supervised and clean_tensor is not None:
+                clean_bc = boxcox_transform(clean_tensor, lmbda=lambda_val, epsilon=epsilon)    # (3, H, W)
+                target_tensor = (clean_bc - mean) / std                                         # (3, H, W)
+            else:
+                target_bc = boxcox_transform(target_sample, lmbda=lambda_val, epsilon=epsilon)  # (3, H, W)
+                target_tensor = (target_bc - mean) / std                                        # (3, H, W)
 
         # CROP
         if self.crop_size:
@@ -189,4 +256,8 @@ class HistogramBinomDataset(Dataset):
             "clean": clean_tensor if clean_tensor is not None else None,  # (3, crop_size, crop_size) or None
             "scene": scene,
             "crop_coords": (i, j, h, w) if self.crop_size else None,              
+            "lambda": lambda_val,           # (3, 1, 1) or None
+            "epsilon": epsilon,             # (3, 1, 1) or None
+            "mean": mean,                   # (3, 1, 1) or None
+            "std": std                      # (3, 1, 1) or None
         }

@@ -13,7 +13,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, unstandardize_tensor
+from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, unstandardize_tensor, compute_global_stats_from_spp32, boxcox_inverse, reinhard_inverse
 
 # Logger
 import logging
@@ -30,7 +30,12 @@ def get_data_loaders(config):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
-    full_dataset = HistogramBinomDataset(**dataset_cfg)
+    # TODO: finish testing global standardisation !!!
+    gloab_mean, glob_std = compute_global_stats_from_spp32(dataset_cfg['root_dir'])
+    logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
+
+    if config['standardisation']=='global':
+        full_dataset = HistogramBinomDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std)
 
     # Split into train/val
     val_ratio = config.get('val_split', 0.2)
@@ -84,17 +89,24 @@ def get_sample(dataset, idx=0, device='cpu'):
     return input_tensor, target, noisy, clean
 
 
-def evaluate_sample(model, input_tensor, clean_tensor, image_mean, image_std):
+def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda):
     with torch.no_grad():
-        pred = model(input_tensor).squeeze(0).clamp(0, 1)
-        clean = clean_tensor.clamp(0, 1)
+        pred = model(input_tensor).squeeze(0)
+        clean = clean_tensor
 
         assert pred.dim() == 3 and clean.dim() == 3
 
-        logger.info(f"Target shape: {clean.shape}")
-        logger.info(f"Pred shape:  {pred.shape}")
-        # Calculate PSNR
-        pred_real = unstandardize_tensor(pred, mean=image_mean, std=image_std).clamp(0, 1)       # H, W, 3
+        logger.info(f"Target shape: {clean.shape}")      # H, W, 3
+        logger.info(f"Pred shape:  {pred.shape}")        # H, W, 3
+
+        if mean is not None and std is not None:
+            pred_unstd = unstandardize_tensor(pred, mean, std)
+
+        if lamda is not None:
+            pred_real = boxcox_inverse(pred_unstd, lmbda=lamda) 
+
+        # pred_real = reinhard_inverse(pred)
+        pred_real = torch.expm1(pred)
         psnr_val = compute_psnr(pred_real, clean)
     return pred_real, psnr_val
 
@@ -118,8 +130,9 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         total_loss += loss.item()
 
         # Plot the first batch in the first epoch for debugging
-        if debug:
-            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['image_mean'], image_std=batch['image_std'])
+        if debug and epoch==3:
+            # plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['mean'], image_std=batch['std'], lamda=batch['lambda'])
+            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
     return total_loss / len(dataloader)
 
@@ -136,8 +149,9 @@ def validate_epoch(model, dataloader, criterion, device):
             hist = batch['input'].to(device)            # B, 3, H, W
             target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)           # B, 3, H, W
-            image_mean = batch['image_mean'].to(device) 
-            image_std = batch['image_std'].to(device) 
+            # image_mean = batch['mean'].to(device)       # 3, 1, 1
+            # image_std = batch['std'].to(device)         # 3, 1, 1
+            # lamda = batch['lambda'].to(device)          # 3, 1, 1
 
             pred = model(hist)                          # B, 3, H, W
             loss = criterion(pred, target)
@@ -145,8 +159,11 @@ def validate_epoch(model, dataloader, criterion, device):
 
             for i in range(pred.shape[0]):
                 # Unstandardize prediction
-                pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i]).clamp(0, 1)       # H, W, 3
-                clean_i = clean[i].clamp(0, 1)
+                # pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i])       # H, W, 3
+                # pred_i = boxcox_inverse(pred_i, lmbda=lamda[i].item()) 
+                # pred_i = reinhard_inverse(pred[i])
+                pred_i = torch.expm1(pred[i])
+                clean_i = clean[i]
 
                 total_psnr += compute_psnr(pred_i, clean_i)
                 count += 1
@@ -156,6 +173,14 @@ def validate_epoch(model, dataloader, criterion, device):
     return avg_loss, avg_psnr
 
 
+class RelativeMSELoss(nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, input, target):
+        return torch.mean((input - target)**2 / (target + self.eps)**2)
+    
 
 # TRAINING LOOP
 def train_model(config):
@@ -187,6 +212,7 @@ def train_model(config):
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
     # TODO: try combined loss MSE * 0.5 + L1 * 0.5
     criterion = nn.MSELoss()
+    # criterion = nn.RelativeMSELoss
     # criterion = nn.L1Loss()
     
     # Model Name
@@ -234,7 +260,6 @@ def train_model(config):
     save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_psnr_plot.png")
 
 
-
 def evaluate_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Evaluating on device: {device}")
@@ -246,51 +271,54 @@ def evaluate_model(config):
     dataset_cfg = config["dataset"]
 
     # Load datasets
-    hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
+    # hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
     img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, hist_regeneration=False)
 
     # Randomly select n indices
-    total_samples = len(hist_dataset)
+    total_samples = len(img_dataset)
     selected_indices = random.sample(range(total_samples), n_samples)
     logger.info(f"Randomly selected indices: {selected_indices}")
 
     # Load models
-    hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    # hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
     img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
 
     for idx in selected_indices:
         logger.info(f"\nEvaluating index: {idx}")
 
         # Get samples
-        hist_sample = hist_dataset.__getitem__(idx)
-        crop_coords = hist_sample["crop_coords"]
-        img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
+        # hist_sample = hist_dataset.__getitem__(idx)
+        # crop_coords = hist_sample["crop_coords"]
+        # img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
+        img_sample = img_dataset.__getitem__(idx)
 
         # Prepare inputs
-        hist_input = hist_sample["input"].unsqueeze(0).to(device)
+        hist_input = img_sample["input"].unsqueeze(0).to(device)
         img_input = img_sample["input"].unsqueeze(0).to(device)
-        target = hist_sample["target"].to(device)
-        noisy = hist_sample["noisy"].to(device)
-        clean = hist_sample.get("clean", None)
+        target = img_sample["target"].to(device)
+        noisy = img_sample["noisy"].to(device)
+        clean = img_sample.get("clean", None)
         if clean is not None:
             clean = clean.to(device)
-        scene = hist_sample["scene"]
-        mean = hist_sample["image_mean"]
-        std = hist_sample["image_std"]
+        scene = img_sample["scene"]
+        # mean = hist_sample["mean"]
+        # std = hist_sample["std"]
+        # lmbda = hist_sample["lambda"]
+        # eps = hist_sample["epsilon"]
 
         # Evaluate models
-        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, image_mean=mean, image_std=std)
-        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, image_mean=mean, image_std=std)
+        # hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None)
+        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, mean=None, std=None, lamda=None)
         init_psnr = compute_psnr(noisy, clean)
 
         logger.info(f"Scene: {scene}")
         logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
-        logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
+        # logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
         logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
         # Save plots
         plot_images(
-            noisy, init_psnr, hist_pred, hist_psnr,
+            noisy, init_psnr, img_pred, img_psnr,
             img_pred, img_psnr, target, clean,
             save_path=f'plots/denoised_{idx}.png'
         )

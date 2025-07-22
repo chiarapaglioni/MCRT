@@ -13,7 +13,7 @@ def conv3x3(in_channels, out_channels, stride=1, padding=1, bias=True):
         bias=bias)
 
 
-def upconv2x2(in_channels, out_channels, mode='transpose'):
+def upconv2x2(in_channels, out_channels):
     return nn.ConvTranspose2d(
         in_channels,
         out_channels,
@@ -133,8 +133,9 @@ class UNet(nn.Module):
             self.input_channels = in_channels
 
         # ENCODER
-        self.down_convs = nn.ModuleList()
         in_ch = self.input_channels
+
+        self.down_convs = nn.ModuleList()
         for i in range(depth):
             out_ch = start_filters * (2 ** i)
             pooling = (i < depth - 1)
@@ -168,6 +169,8 @@ class UNet(nn.Module):
         if self.mode == 'hist':
             B, C, bins, H, W = x.shape
             x = x.view(B, C * bins, H, W)
+            # reduce dimensionality before feeding input to the network
+            # x = self.input_proj(x)
 
         else:  # 'img' mode
             # input is already (B, 3, H, W)
