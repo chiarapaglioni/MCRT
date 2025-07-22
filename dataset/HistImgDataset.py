@@ -146,10 +146,8 @@ class HistogramBinomDataset(Dataset):
         target_sample = spp1_img[target_idx]          # (3, H, W)
 
         input_avg = input_samples.mean(axis=0)  # (3, H, W)
-        input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
-        
-        # NORMALISE avg image
         input_avg = np.log1p(input_avg)
+        input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
         
         target_sample = np.log1p(target_sample) # shape: (3, H, W)
         target_tensor = torch.from_numpy(target_sample).float()  # shape: (3, H, W)
