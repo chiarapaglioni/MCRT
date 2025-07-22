@@ -130,7 +130,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         total_loss += loss.item()
 
         # Plot the first batch in the first epoch for debugging
-        if debug and epoch==3:
+        if debug:
             # plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['mean'], image_std=batch['std'], lamda=batch['lambda'])
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
@@ -271,7 +271,7 @@ def evaluate_model(config):
     dataset_cfg = config["dataset"]
 
     # Load datasets
-    # hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
+    hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
     img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, hist_regeneration=False)
 
     # Randomly select n indices
@@ -280,45 +280,46 @@ def evaluate_model(config):
     logger.info(f"Randomly selected indices: {selected_indices}")
 
     # Load models
-    # hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
     img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
 
     for idx in selected_indices:
         logger.info(f"\nEvaluating index: {idx}")
 
         # Get samples
-        # hist_sample = hist_dataset.__getitem__(idx)
-        # crop_coords = hist_sample["crop_coords"]
-        # img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
-        img_sample = img_dataset.__getitem__(idx)
+        hist_sample = hist_dataset.__getitem__(idx)
+        crop_coords = hist_sample["crop_coords"]
+        img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
 
         # Prepare inputs
-        hist_input = img_sample["input"].unsqueeze(0).to(device)
+        hist_input = hist_sample["input"].unsqueeze(0).to(device)
         img_input = img_sample["input"].unsqueeze(0).to(device)
-        target = img_sample["target"].to(device)
-        noisy = img_sample["noisy"].to(device)
-        clean = img_sample.get("clean", None)
+        target = hist_sample["target"].to(device)
+        noisy = hist_sample["noisy"].to(device)
+        clean = hist_sample.get("clean", None)
         if clean is not None:
             clean = clean.to(device)
-        scene = img_sample["scene"]
+        scene = hist_sample["scene"]
         # mean = hist_sample["mean"]
         # std = hist_sample["std"]
         # lmbda = hist_sample["lambda"]
         # eps = hist_sample["epsilon"]
 
         # Evaluate models
-        # hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None)
+        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None)
         img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, mean=None, std=None, lamda=None)
         init_psnr = compute_psnr(noisy, clean)
 
         logger.info(f"Scene: {scene}")
         logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
-        # logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
+        logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
         logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
         # Save plots
         plot_images(
-            noisy, init_psnr, img_pred, img_psnr,
-            img_pred, img_psnr, target, clean,
+            noisy, init_psnr, 
+            img_pred, img_psnr,
+            hist_pred, hist_psnr, 
+            target, clean,
             save_path=f'plots/denoised_{idx}.png'
         )

@@ -144,10 +144,33 @@ class HistogramBinomDataset(Dataset):
         input_idx, target_idx = self.scene_sample_indices[scene]
         input_samples = spp1_img[input_idx]           # (N-1, 3, H, W)
         target_sample = spp1_img[target_idx]          # (3, H, W)
+        
+        if self.mode == "hist":
+            hist_norm = self.hist_features[scene]               # (H, W, 3, bins)
 
-        input_avg = input_samples.mean(axis=0)  # (3, H, W)
-        input_avg = np.log1p(input_avg)
-        input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
+            # Calculate mean and std per pixel/channel from input_samples: shape (N-1, 3, H, W)
+            mean = np.mean(input_samples, axis=0)  # (3, H, W)
+            std = np.std(input_samples, axis=0)    # (3, H, W)
+
+            # Move mean/std to shape (H, W, 3) for concatenation with histograms
+            mean = np.transpose(mean, (1, 2, 0))  # (H, W, 3)
+            std = np.transpose(std, (1, 2, 0))    # (H, W, 3)
+
+            # Log-transform mean and std, add singleton bins dimension for concat
+            mean_log = np.log1p(mean)[..., None]  # (H, W, 3, 1)
+            std_log = np.log1p(std)[..., None]    # (H, W, 3, 1)
+
+            # Concatenate normalized histogram + mean_log + std_log on bins axis
+            combined = np.concatenate([hist_norm, mean_log, std_log], axis=-1)  # (H, W, 3, bins+2)
+
+            # Rearrange dimensions to (3, bins+2, H, W) for model input
+            combined = np.transpose(combined, (2, 3, 0, 1))  # (3, bins+2, H, W)
+            input_tensor = torch.from_numpy(combined).float()
+        
+        else:
+            input_avg = input_samples.mean(axis=0)  # (3, H, W)
+            input_avg = np.log1p(input_avg)
+            input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
         
         target_sample = np.log1p(target_sample) # shape: (3, H, W)
         target_tensor = torch.from_numpy(target_sample).float()  # shape: (3, H, W)
