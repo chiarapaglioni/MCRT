@@ -13,7 +13,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, unstandardize_tensor, compute_global_stats_from_spp32, boxcox_inverse, reinhard_inverse
+from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, unstandardize_tensor, compute_global_mean_std, boxcox_inverse, reinhard_inverse
 
 # Logger
 import logging
@@ -31,7 +31,7 @@ def get_data_loaders(config):
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
     # TODO: finish testing global standardisation !!!
-    gloab_mean, glob_std = compute_global_stats_from_spp32(dataset_cfg['root_dir'])
+    gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if config['standardisation']=='global':
@@ -89,7 +89,7 @@ def get_sample(dataset, idx=0, device='cpu'):
     return input_tensor, target, noisy, clean
 
 
-def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda):
+def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda, tonemap):
     with torch.no_grad():
         pred = model(input_tensor).squeeze(0)
         clean = clean_tensor
@@ -105,8 +105,11 @@ def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda):
         if lamda is not None:
             pred_real = boxcox_inverse(pred_unstd, lmbda=lamda) 
 
-        # pred_real = reinhard_inverse(pred)
-        # pred_real = torch.expm1(pred)
+        # apply tonemap to model output
+        if tonemap=='reinhard':
+            pred_real = reinhard_inverse(pred)
+        elif tonemap=='log':
+            pred_real = torch.expm1(pred)
         psnr_val = compute_psnr(pred_real, clean)
     return pred_real, psnr_val
 
@@ -130,7 +133,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         total_loss += loss.item()
 
         # Plot the first batch in the first epoch for debugging
-        if debug:
+        if debug and epoch==10:
             # plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['mean'], image_std=batch['std'], lamda=batch['lambda'])
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
@@ -138,7 +141,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
 
 
 # VALIDATION STEP
-def validate_epoch(model, dataloader, criterion, device):
+def validate_epoch(model, dataloader, criterion, device, tonemap):
     model.eval()
     total_loss = 0
     total_psnr = 0
@@ -158,13 +161,16 @@ def validate_epoch(model, dataloader, criterion, device):
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
-                # Unstandardize prediction
                 # pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i])       # H, W, 3
                 # pred_i = boxcox_inverse(pred_i, lmbda=lamda[i].item()) 
                 
-                # pred_i = reinhard_inverse(pred[i])
-                # pred_i = torch.expm1(pred[i])
-                pred_i = pred[i]
+                # Unstandardize prediction
+                if tonemap=='reinhard':
+                    pred_i = reinhard_inverse(pred[i])
+                elif tonemap=='log':
+                    pred_i = torch.expm1(pred[i])
+                else:
+                    pred_i = pred[i]
                 clean_i = clean[i]
 
                 total_psnr += compute_psnr(pred_i, clean_i)
@@ -230,10 +236,16 @@ def train_model(config):
 
     # Optimizer + Loss (MSE for Mean)
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+
     # LOSS FUNCTIONS 
-    # criterion = nn.MSELoss()          # when input is same as output
-    # criterion = RelativeMSELoss()       # when input tone mapping but output isn't
-    criterion = LHDRLoss()
+    logger.info(f"Using Tonemap: {dataset_cfg['tonemap'].upper()}")
+    logger.info(f"Using Loss: {config['loss'].upper()}")
+    if config['loss']=='mse':
+        criterion = nn.MSELoss()            # when input is same as output
+    elif config['loss']=='rmse':
+        criterion = RelativeMSELoss()       # when input tone mapping but output isn't
+    elif config['loss']=='lhdr':
+        criterion = LHDRLoss()
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -258,7 +270,7 @@ def train_model(config):
         start_time = time.time()
 
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, debug=dataset_cfg['debug'])
-        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device)
+        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'])
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -326,8 +338,8 @@ def evaluate_model(config):
         # eps = hist_sample["epsilon"]
 
         # Evaluate models
-        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None)
-        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, mean=None, std=None, lamda=None)
+        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None, tonemap=dataset_cfg['tonemap'])
+        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, mean=None, std=None, lamda=None, tonemap=dataset_cfg['tonemap'])
         init_psnr = compute_psnr(noisy, clean)
 
         logger.info(f"Scene: {scene}")

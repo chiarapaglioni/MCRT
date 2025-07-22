@@ -17,7 +17,8 @@ class HistogramBinomDataset(Dataset):
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
                  clean: bool = False, cached_dir: str = None, debug: bool = False, 
                  device: str = None, hist_regeneration: bool = False, scene_names=None, 
-                 supervised: bool = False, global_mean = None, global_std = None):
+                 supervised: bool = False, global_mean = None, global_std = None, 
+                 tonemap: str = None):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -31,7 +32,9 @@ class HistogramBinomDataset(Dataset):
         self.debug = debug
         self.device = device or torch.device("cpu")
         self.hist_regeneration = hist_regeneration
+        self.tonemap = tonemap
 
+        # mean/std for normalisation
         self.image_mean_std = {}  # (scene) -> (mean, std)
         self.global_mean = global_mean
         self.global_std = global_std
@@ -141,9 +144,9 @@ class HistogramBinomDataset(Dataset):
             scene = random.choice(self.scene_names)
         else:               # eval
             scene = self.scene_names[idx % len(self.scene_names)]
-        spp1_img = self.spp1_images[scene]          # (low_spp, H, W, 3)
-        noisy_tensor = self.noisy_images[scene]     # (3, H, W)
-        clean_tensor = self.clean_images.get(scene, None)
+        spp1_img = self.spp1_images[scene]                  # (low_spp, H, W, 3)
+        noisy_tensor = self.noisy_images[scene]             # (3, H, W)
+        clean_tensor = self.clean_images.get(scene, None)   # (3, H, W)
 
         input_idx, target_idx = self.scene_sample_indices[scene]
         input_samples = spp1_img[input_idx]           # (N-1, 3, H, W)
@@ -152,38 +155,43 @@ class HistogramBinomDataset(Dataset):
         if self.mode == "hist":
             hist_norm = self.hist_features[scene]               # (H, W, 3, bins)
 
-            # Calculate mean and std per pixel/channel from input_samples: shape (N-1, 3, H, W)
-            mean = np.mean(input_samples, axis=0)  # (3, H, W)
-            std = np.std(input_samples, axis=0)    # (3, H, W)
+            input_samples_tensor = torch.from_numpy(input_samples).float()  # (N-1, 3, H, W)
+            mean = input_samples_tensor.mean(dim=0)  # (3, H, W)
+            std = input_samples_tensor.std(dim=0)    # (3, H, W)
 
-            # Move mean/std to shape (H, W, 3) for concatenation with histograms
-            mean = np.transpose(mean, (1, 2, 0))  # (H, W, 3)
-            std = np.transpose(std, (1, 2, 0))    # (H, W, 3)
+            # TONEMAP
+            if self.tonemap == 'log':
+                mean_t = torch.log1p(mean).unsqueeze(1)  # (3, 1, H, W)
+                std_t = torch.log1p(std).unsqueeze(1)    # (3, 1, H, W)
+            elif self.tonemap == 'reinhard':
+                mean_t = reinhard_tonemap(mean).unsqueeze(1)
+                std_t = reinhard_tonemap(std).unsqueeze(1)
 
-            # Log-transform mean and std, add singleton bins dimension for concat
-            # mean_log = np.log1p(mean)[..., None]  # (H, W, 3, 1)
-            # std_log = np.log1p(std)[..., None]    # (H, W, 3, 1)
-
-            # Apply Reinhard tone mapping to mean and std, then add singleton bin dimension
-            mean_tm = reinhard_tonemap(mean)[..., None]  # (H, W, 3, 1)
-            std_tm = reinhard_tonemap(std)[..., None]    # (H, W, 3, 1)
-
-            # Concatenate normalized histogram + mean_log + std_log on bins axis
-            combined = np.concatenate([hist_norm, mean_tm, std_tm], axis=-1)  # (H, W, 3, bins+2)
-
-            # Rearrange dimensions to (3, bins+2, H, W) for model input
-            combined = np.transpose(combined, (2, 3, 0, 1))  # (3, bins+2, H, W)
-            input_tensor = torch.from_numpy(combined).float()
+            # Histogram from numpy → torch, (H, W, 3, bins) → (3, bins, H, W)
+            hist_torch = torch.from_numpy(hist_norm).permute(2, 3, 0, 1).float()
+            input_tensor = torch.cat([hist_torch, mean_t, std_t], dim=1)  # (3, bins+2, H, W)
         
         else:
             input_avg = input_samples.mean(axis=0)  # (3, H, W)
-            # input_avg = np.log1p(input_avg)
-            input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
-            input_tensor = reinhard_tonemap(input_tensor)
+            if self.tonemap == 'log':
+                input_avg = np.log1p(input_avg)
+                input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
+            elif self.tonemap == 'reinhard':
+                input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
+                input_tensor = reinhard_tonemap(input_tensor)
         
-        # target_sample = np.log1p(target_sample) # shape: (3, H, W)
-        target_tensor = torch.from_numpy(target_sample).float()  # shape: (3, H, W)
-        # target_tensor = reinhard_tonemap(target_tensor)
+        if self.supervised:
+            if self.tonemap == 'log':
+                target_tensor = torch.log1p(clean_tensor)                   # shape: (3, H, W)
+            elif self.tonemap == 'reinhard':
+                target_tensor = reinhard_tonemap(clean_tensor)
+        else: 
+            if self.tonemap == 'log':
+                target_sample = np.log1p(target_sample)                     # shape: (3, H, W)
+                target_tensor = torch.from_numpy(target_sample).float()     # shape: (3, H, W)
+            elif self.tonemap == 'reinhard':
+                target_sample = torch.from_numpy(target_sample).float()     # shape: (3, H, W)
+                target_tensor = reinhard_tonemap(target_sample)
 
         # CROP
         if self.crop_size:

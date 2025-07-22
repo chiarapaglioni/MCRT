@@ -286,10 +286,9 @@ def print_histogram_at_pixel(hist_tensor, x, y, used_bins):
         print(f"{color} channel: {vals}")
 
 
-def compute_global_stats_from_spp32(root_dir, lambda_val=0.5, epsilon=1e-6):
+def compute_global_mean_std(root_dir):
     """
     Compute global mean and std from all 1x32spp TIFF images (MC rendered).
-    Applies Box-Cox transform before computing stats.
     Returns: (mean, std) as torch tensors with shape (3, 1, 1)
     """
     sum_ = torch.zeros(3)
@@ -310,9 +309,7 @@ def compute_global_stats_from_spp32(root_dir, lambda_val=0.5, epsilon=1e-6):
         img = tifffile.imread(img_path)  # shape: (32, H, W, 3)
         img = torch.from_numpy(img).permute(0, 3, 1, 2).float()  # (32, 3, H, W)
 
-        img_bc = boxcox_transform(img, lmbda=lambda_val, epsilon=epsilon)  # Apply Box-Cox
-
-        flat = img_bc.permute(0, 2, 3, 1).reshape(-1, 3)  # Flatten to (N*H*W, 3)
+        flat = img.permute(0, 2, 3, 1).reshape(-1, 3)  # Flatten to (N*H*W, 3)
         sum_ += flat.sum(dim=0)
         sum_sq_ += (flat ** 2).sum(dim=0)
         count += flat.shape[0]
