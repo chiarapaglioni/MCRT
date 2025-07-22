@@ -1,0 +1,108 @@
+2025-07-22 18:30:19,475 - INFO - MCRT DENOISING :)
+2025-07-22 18:30:19,490 - INFO - Using device: cpu
+2025-07-22 18:30:26,996 - INFO - DATASET mean [1.2125, 0.9781, 0.7963] - std [8.1113, 6.4785, 5.2049]
+2025-07-22 18:30:26,997 - INFO - Supervised (noise2clean) mode
+2025-07-22 18:30:26,998 - INFO - 14 scenes: ['bathroom2_scene', 'bathroom_scene', 'bedroom_scene', 'classroom_scene', 'dining-room_scene', 'house_scene', 'house_scene-above', 'kitchen_scene', 'living-room-2_scene', 'living-room-3_scene', 'living-room_scene', 'staircase2_scene', 'staircase_scene', 'veach-ajar_scene']
+2025-07-22 18:30:34,478 - INFO - Total dataset size: 500
+2025-07-22 18:30:34,478 - INFO - Training set size:  400
+2025-07-22 18:30:34,479 - INFO - Validation set size: 100
+qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in ""
+Backend QtAgg is interactive backend. Turning interactive mode on.
+qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in ""
+Backend QtAgg is interactive backend. Turning interactive mode on.
+2025-07-22 18:31:48,399 - INFO - Input shape:  torch.Size([32, 3, 128, 128])
+2025-07-22 18:31:48,399 - INFO - Target shape: torch.Size([32, 3, 128, 128])
+2025-07-22 18:31:48,399 - INFO - Noisy shape:  torch.Size([32, 3, 128, 128])
+2025-07-22 18:31:48,400 - INFO - Clean shape:  torch.Size([32, 3, 128, 128])
+2025-07-22 18:31:48,400 - INFO - 
+Dataset Config: IMG mode | Crop Size: 128 | Augmentation: True
+2025-07-22 18:31:48,400 - INFO - Model Config: Depth=3 | Start Filters=32 | Output: mean
+2025-07-22 18:31:48,400 - INFO - Training for 20 epochs | Batch Size: 32 | Val Split: 0.2 | Learning Rate: 1e-4
+
+2025-07-22 18:31:58,427 - INFO - Using Tonemap: LOG
+2025-07-22 18:31:58,428 - INFO - Using Loss: MSE
+2025-07-22 18:31:58,428 - INFO - TRAINING STARTED !
+2025-07-22 18:32:54,124 - INFO - [Epoch 1/20] Train Loss: 0.3497 | Val Loss: 0.3538 | Val PSNR: 16.83 dB | Time: 55.70s
+2025-07-22 18:32:54,134 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:33:49,094 - INFO - [Epoch 2/20] Train Loss: 0.1747 | Val Loss: 0.0637 | Val PSNR: 18.01 dB | Time: 54.96s
+2025-07-22 18:33:49,104 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:34:44,001 - INFO - [Epoch 3/20] Train Loss: 0.0593 | Val Loss: 0.0270 | Val PSNR: 21.09 dB | Time: 54.90s
+2025-07-22 18:34:44,010 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:35:38,393 - INFO - [Epoch 4/20] Train Loss: 0.0429 | Val Loss: 0.0724 | Val PSNR: 21.60 dB | Time: 54.38s
+2025-07-22 18:36:31,603 - INFO - [Epoch 5/20] Train Loss: 0.0355 | Val Loss: 0.0292 | Val PSNR: 23.50 dB | Time: 53.21s
+2025-07-22 18:37:27,451 - INFO - [Epoch 6/20] Train Loss: 0.0327 | Val Loss: 0.0549 | Val PSNR: 22.43 dB | Time: 55.85s
+2025-07-22 18:38:20,974 - INFO - [Epoch 7/20] Train Loss: 0.0231 | Val Loss: 0.0337 | Val PSNR: 22.67 dB | Time: 53.52s
+2025-07-22 18:39:13,518 - INFO - [Epoch 8/20] Train Loss: 0.0260 | Val Loss: 0.0169 | Val PSNR: 24.40 dB | Time: 52.54s
+2025-07-22 18:39:13,527 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:40:08,758 - INFO - [Epoch 9/20] Train Loss: 0.0233 | Val Loss: 0.0179 | Val PSNR: 24.21 dB | Time: 55.23s
+2025-07-22 18:41:03,213 - INFO - [Epoch 10/20] Train Loss: 0.0207 | Val Loss: 0.0204 | Val PSNR: 23.56 dB | Time: 54.45s
+qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in ""
+2025-07-22 18:41:10,905 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:10,908 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:10,910 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:10,914 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:10,919 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:23,079 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:23,081 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:23,083 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:23,086 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:23,089 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:35,194 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:35,205 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:35,217 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:41,404 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:41,406 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:41,409 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:41,414 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:41,417 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:47,516 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:47,521 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:47,526 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:47,532 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:47,539 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:55,324 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:55,327 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:55,329 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:55,332 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:41:55,339 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:01,512 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:01,514 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:01,517 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:07,295 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:07,298 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:07,300 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:07,304 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:07,308 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:12,583 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:12,585 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:12,587 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:12,589 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:12,592 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:17,844 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:17,847 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:17,849 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:17,855 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:17,858 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:23,017 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:23,021 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:23,024 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:27,698 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:27,702 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:27,706 - WARNING - Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
+2025-07-22 18:42:35,982 - INFO - [Epoch 11/20] Train Loss: 0.0175 | Val Loss: 0.0202 | Val PSNR: 24.46 dB | Time: 92.77s
+2025-07-22 18:43:29,796 - INFO - [Epoch 12/20] Train Loss: 0.0188 | Val Loss: 0.0278 | Val PSNR: 25.13 dB | Time: 53.81s
+2025-07-22 18:44:22,048 - INFO - [Epoch 13/20] Train Loss: 0.0162 | Val Loss: 0.0123 | Val PSNR: 26.30 dB | Time: 52.25s
+2025-07-22 18:44:22,057 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:45:14,271 - INFO - [Epoch 14/20] Train Loss: 0.0144 | Val Loss: 0.0147 | Val PSNR: 25.92 dB | Time: 52.21s
+2025-07-22 18:46:06,533 - INFO - [Epoch 15/20] Train Loss: 0.0104 | Val Loss: 0.0140 | Val PSNR: 26.98 dB | Time: 52.26s
+2025-07-22 18:46:58,371 - INFO - [Epoch 16/20] Train Loss: 0.0115 | Val Loss: 0.0110 | Val PSNR: 27.15 dB | Time: 51.84s
+2025-07-22 18:46:58,380 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:47:52,913 - INFO - [Epoch 17/20] Train Loss: 0.0104 | Val Loss: 0.0108 | Val PSNR: 27.26 dB | Time: 54.53s
+2025-07-22 18:47:52,923 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:48:45,099 - INFO - [Epoch 18/20] Train Loss: 0.0101 | Val Loss: 0.0124 | Val PSNR: 26.49 dB | Time: 52.18s
+2025-07-22 18:49:37,348 - INFO - [Epoch 19/20] Train Loss: 0.0100 | Val Loss: 0.0107 | Val PSNR: 28.19 dB | Time: 52.25s
+2025-07-22 18:49:37,356 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:50:31,303 - INFO - [Epoch 20/20] Train Loss: 0.0102 | Val Loss: 0.0101 | Val PSNR: 28.04 dB | Time: 53.95s
+2025-07-22 18:50:31,315 - INFO - Saved best model to checkpoints/2025-07-22_noise2noise_mean_binsimg.pth
+2025-07-22 18:50:31,603 - INFO - Loss plot saved to plots/2025-07-22_img_loss_plot.png
+2025-07-22 18:50:31,849 - INFO - Saved PSNR plot to plots/2025-07-22_img_psnr_plot.png
