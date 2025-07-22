@@ -6,6 +6,7 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
+from utils.utils import reinhard_tonemap
 
 import logging
 logger = logging.getLogger(__name__)
@@ -157,11 +158,15 @@ class HistogramBinomDataset(Dataset):
             std = np.transpose(std, (1, 2, 0))    # (H, W, 3)
 
             # Log-transform mean and std, add singleton bins dimension for concat
-            mean_log = np.log1p(mean)[..., None]  # (H, W, 3, 1)
-            std_log = np.log1p(std)[..., None]    # (H, W, 3, 1)
+            # mean_log = np.log1p(mean)[..., None]  # (H, W, 3, 1)
+            # std_log = np.log1p(std)[..., None]    # (H, W, 3, 1)
+
+            # Apply Reinhard tone mapping to mean and std, then add singleton bin dimension
+            mean_tm = reinhard_tonemap(mean)[..., None]  # (H, W, 3, 1)
+            std_tm = reinhard_tonemap(std)[..., None]    # (H, W, 3, 1)
 
             # Concatenate normalized histogram + mean_log + std_log on bins axis
-            combined = np.concatenate([hist_norm, mean_log, std_log], axis=-1)  # (H, W, 3, bins+2)
+            combined = np.concatenate([hist_norm, mean_tm, std_tm], axis=-1)  # (H, W, 3, bins+2)
 
             # Rearrange dimensions to (3, bins+2, H, W) for model input
             combined = np.transpose(combined, (2, 3, 0, 1))  # (3, bins+2, H, W)
@@ -169,11 +174,13 @@ class HistogramBinomDataset(Dataset):
         
         else:
             input_avg = input_samples.mean(axis=0)  # (3, H, W)
-            input_avg = np.log1p(input_avg)
+            # input_avg = np.log1p(input_avg)
             input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
+            input_tensor = reinhard_tonemap(target_tensor)
         
-        target_sample = np.log1p(target_sample) # shape: (3, H, W)
+        # target_sample = np.log1p(target_sample) # shape: (3, H, W)
         target_tensor = torch.from_numpy(target_sample).float()  # shape: (3, H, W)
+        target_tensor = reinhard_tonemap(target_tensor)
 
         # CROP
         if self.crop_size:

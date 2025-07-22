@@ -105,8 +105,8 @@ def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda):
         if lamda is not None:
             pred_real = boxcox_inverse(pred_unstd, lmbda=lamda) 
 
-        # pred_real = reinhard_inverse(pred)
-        pred_real = torch.expm1(pred)
+        pred_real = reinhard_inverse(pred)
+        # pred_real = torch.expm1(pred)
         psnr_val = compute_psnr(pred_real, clean)
     return pred_real, psnr_val
 
@@ -130,7 +130,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         total_loss += loss.item()
 
         # Plot the first batch in the first epoch for debugging
-        if debug:
+        if debug and epoch==8:
             # plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['mean'], image_std=batch['std'], lamda=batch['lambda'])
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
@@ -161,8 +161,9 @@ def validate_epoch(model, dataloader, criterion, device):
                 # Unstandardize prediction
                 # pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i])       # H, W, 3
                 # pred_i = boxcox_inverse(pred_i, lmbda=lamda[i].item()) 
-                # pred_i = reinhard_inverse(pred[i])
-                pred_i = torch.expm1(pred[i])
+                
+                pred_i = reinhard_inverse(pred[i])
+                # pred_i = torch.expm1(pred[i])
                 clean_i = clean[i]
 
                 total_psnr += compute_psnr(pred_i, clean_i)

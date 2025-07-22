@@ -450,37 +450,53 @@ def boxcox_and_standardize(tensor, dim=None, global_mean=None, global_std=None):
     return normalized, mean, std
 
 
-def reinhard_tonemap(x):
+def reinhard_tonemap(x, gamma=2.2):
     """
-    Applies gamma-compressed Reinhard global tone mapping to input tensor.
+    Applies gamma-compressed Reinhard global tone mapping to input.
     
-    Formula:
-        T(v) = (v / (1 + v))^(1/γ)
-    
+    Supports both torch.Tensor and np.ndarray.
+
     Args:
-        x (torch.Tensor): HDR image tensor (any shape), values >= 0
-    
+        x (torch.Tensor or np.ndarray): HDR image, values >= 0
+        gamma (float): Gamma compression value
+
     Returns:
-        torch.Tensor: Tone-mapped image in [0, 1] range
+        Same type as input: tone-mapped image in [0, 1] range
     """
-    gamma = 2.2
-    return torch.pow(x / (1.0 + x + 1e-8), 1.0 / gamma)  # add epsilon to avoid div by zero
+    eps = 1e-8
+    if isinstance(x, torch.Tensor):
+        return torch.pow(x / (1.0 + x + eps), 1.0 / gamma)
+    elif isinstance(x, np.ndarray):
+        return np.power(x / (1.0 + x + eps), 1.0 / gamma)
+    else:
+        raise TypeError("Input must be a torch.Tensor or np.ndarray")
 
 
-def reinhard_inverse(x):
+def reinhard_inverse(x, gamma=2.2):
     """
     Inverts gamma-compressed Reinhard tone mapping.
-    
-    Formula:
-        T⁻¹(t) = (t^γ) / (1 - t^γ)
-    
+
+    Supports both torch.Tensor and np.ndarray.
+
     Args:
-        x (torch.Tensor): Tone-mapped image tensor, expected in [0, 1]
-    
+        x (torch.Tensor or np.ndarray): Tone-mapped image in [0, 1]
+        gamma (float): Gamma compression value
+
     Returns:
-        torch.Tensor: Reconstructed HDR image
+        Same type as input: reconstructed HDR image
     """
-    gamma = 2.2
-    x = torch.clamp(x, min=0.0, max=1.0 - 1e-6)  # Clamp to avoid division by zero
-    x_pow = torch.pow(x, gamma)
-    return x_pow / (1.0 - x_pow + 1e-8)
+    eps = 1e-8
+    max_val = 1.0 - 1e-6  # avoid 1.0 exactly
+
+    if isinstance(x, torch.Tensor):
+        x = torch.clamp(x, min=0.0, max=max_val)
+        x_pow = torch.pow(x, gamma)
+        return x_pow / (1.0 - x_pow + eps)
+
+    elif isinstance(x, np.ndarray):
+        x = np.clip(x, 0.0, max_val)
+        x_pow = np.power(x, gamma)
+        return x_pow / (1.0 - x_pow + eps)
+
+    else:
+        raise TypeError("Input must be a torch.Tensor or np.ndarray")
