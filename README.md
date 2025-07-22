@@ -4,9 +4,12 @@
 ```
 MCRT/
 ├── data/
+├── dataset/
 ├── scripts/
 ├── model/
+├── renderer/
 ├── output/
+├── utils/
 ├── config/
 ├── launch.py
 ├── mcrt.yml
@@ -14,9 +17,12 @@ MCRT/
 
 where: 
 - **data**: raw data (_XML_) of the scenes/images to be rendered
+- **dataset**: implementation of custom dataloader class to load and process image and histogram data
 - **scripts**: jupyter notebooks to render scenes in low/high res (_TIFF_) and generate histograms (_NPZ_)
 - **model**: binomial split dataset and denoising model
+- **renderer**: functions used to render noisy and clean images using _Mitsuba3_ (supports both CPU and GPU)
 - **output**: folder containing the output (_TIFF_) files
+- **utils**: contains utils functions for tone mapping, logging and plotting
 - **config**: folder containing the configurations for the various tasks
 - **launch.py**: main file to run the project
 
