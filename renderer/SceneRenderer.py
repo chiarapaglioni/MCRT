@@ -98,3 +98,53 @@ class SceneRenderer:
         tifffile.imwrite(output_path, stack, photometric='rgb', dtype='float32')
         if self.debug:
             print(f"Saved {len(images)} images to {output_path}")
+
+
+def render_albedo_image(self):
+    """
+    Renders the albedo (diffuse reflectance) of the scene using Mitsuba's 'field' integrator.
+
+    Returns:
+    - albedo_image (ndarray): (height, width, 3)
+    """
+    print("Using.. scalar_rgb (for albedo)")
+    mi.set_variant("scalar_rgb")
+    scene = mi.load_file(str(self.scene_path))
+
+    # Use the same sensor as generate_samples_from_scene
+    old_sensor = scene.sensors()[0]
+    params = mi.traverse(old_sensor)
+
+    sensor = mi.load_dict({
+        'type': "perspective",
+        'fov': params['x_fov'],
+        'near_clip': old_sensor.near_clip(),
+        'far_clip': old_sensor.far_clip(),
+        'to_world': old_sensor.world_transform(),
+        'sampler': {
+            'type': 'independent',
+            'sample_count': 1
+        },
+        'film': {
+            'type': 'hdrfilm',
+            'width': self.width,
+            'height': self.height,
+            'rfilter': {'type': 'box'},
+            'pixel_format': 'rgb',
+            'component_format': 'float32'
+        }
+    })
+
+    # Load the albedo integrator
+    integrator = mi.load_dict({
+        "type": "field",
+        "field": "albedo"
+    })
+
+    # Render the albedo
+    albedo_image = mi.render(scene, sensor=sensor, integrator=integrator)
+
+    if self.debug:
+        print("Albedo Image:", albedo_image.shape)
+
+    return np.array(albedo_image)
