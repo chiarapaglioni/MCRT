@@ -105,7 +105,7 @@ def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda):
         if lamda is not None:
             pred_real = boxcox_inverse(pred_unstd, lmbda=lamda) 
 
-        pred_real = reinhard_inverse(pred)
+        # pred_real = reinhard_inverse(pred)
         # pred_real = torch.expm1(pred)
         psnr_val = compute_psnr(pred_real, clean)
     return pred_real, psnr_val
@@ -130,7 +130,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         total_loss += loss.item()
 
         # Plot the first batch in the first epoch for debugging
-        if debug and epoch==8:
+        if debug:
             # plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['mean'], image_std=batch['std'], lamda=batch['lambda'])
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
@@ -162,8 +162,9 @@ def validate_epoch(model, dataloader, criterion, device):
                 # pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i])       # H, W, 3
                 # pred_i = boxcox_inverse(pred_i, lmbda=lamda[i].item()) 
                 
-                pred_i = reinhard_inverse(pred[i])
+                # pred_i = reinhard_inverse(pred[i])
                 # pred_i = torch.expm1(pred[i])
+                pred_i = pred[i]
                 clean_i = clean[i]
 
                 total_psnr += compute_psnr(pred_i, clean_i)
@@ -172,6 +173,24 @@ def validate_epoch(model, dataloader, criterion, device):
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count
     return avg_loss, avg_psnr
+
+
+class LHDRLoss(nn.Module):
+    def __init__(self, epsilon=0.01):
+        super(LHDRLoss, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, pred, target):
+        # pred: network output, linear luminance, shape (B, C, H, W)
+        # target: ground truth linear luminance, same shape
+
+        # Detach denominator gradient as per paper (treat denominator as constant)
+        denominator = pred.detach() + self.epsilon
+
+        # Compute squared error normalized by squared denominator
+        loss = ((pred - target) ** 2) / (denominator ** 2)
+
+        return loss.mean()
 
 
 class RelativeMSELoss(nn.Module):
@@ -211,10 +230,10 @@ def train_model(config):
 
     # Optimizer + Loss (MSE for Mean)
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
-    # TODO: try combined loss MSE * 0.5 + L1 * 0.5
-    criterion = nn.MSELoss()
-    # criterion = nn.RelativeMSELoss
-    # criterion = nn.L1Loss()
+    # LOSS FUNCTIONS 
+    # criterion = nn.MSELoss()          # when input is same as output
+    # criterion = RelativeMSELoss()       # when input tone mapping but output isn't
+    criterion = LHDRLoss()
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")

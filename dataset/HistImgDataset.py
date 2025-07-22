@@ -136,10 +136,13 @@ class HistogramBinomDataset(Dataset):
     def __len__(self):
         return self.virt_size
 
-    def __getitem__(self, idx, crop_coords=None):
-        scene = random.choice(self.scene_names)
-        spp1_img = self.spp1_images[scene]  # (low_spp, H, W, 3)
-        noisy_tensor = self.noisy_images[scene]  # (3, H, W)
+    def __getitem__(self, idx=None, crop_coords=None):
+        if idx is None:     # training
+            scene = random.choice(self.scene_names)
+        else:               # eval
+            scene = self.scene_names[idx % len(self.scene_names)]
+        spp1_img = self.spp1_images[scene]          # (low_spp, H, W, 3)
+        noisy_tensor = self.noisy_images[scene]     # (3, H, W)
         clean_tensor = self.clean_images.get(scene, None)
 
         input_idx, target_idx = self.scene_sample_indices[scene]
@@ -176,11 +179,11 @@ class HistogramBinomDataset(Dataset):
             input_avg = input_samples.mean(axis=0)  # (3, H, W)
             # input_avg = np.log1p(input_avg)
             input_tensor = torch.from_numpy(input_avg).float()  # (3, H, W)
-            input_tensor = reinhard_tonemap(target_tensor)
+            input_tensor = reinhard_tonemap(input_tensor)
         
         # target_sample = np.log1p(target_sample) # shape: (3, H, W)
         target_tensor = torch.from_numpy(target_sample).float()  # shape: (3, H, W)
-        target_tensor = reinhard_tonemap(target_tensor)
+        # target_tensor = reinhard_tonemap(target_tensor)
 
         # CROP
         if self.crop_size:
