@@ -451,9 +451,36 @@ def boxcox_and_standardize(tensor, dim=None, global_mean=None, global_std=None):
 
 
 def reinhard_tonemap(x):
-    return torch.pow(x / (1.0 + x), 1.0 / 2.2)
+    """
+    Applies gamma-compressed Reinhard global tone mapping to input tensor.
+    
+    Formula:
+        T(v) = (v / (1 + v))^(1/γ)
+    
+    Args:
+        x (torch.Tensor): HDR image tensor (any shape), values >= 0
+    
+    Returns:
+        torch.Tensor: Tone-mapped image in [0, 1] range
+    """
+    gamma = 2.2
+    return torch.pow(x / (1.0 + x + 1e-8), 1.0 / gamma)  # add epsilon to avoid div by zero
+
 
 def reinhard_inverse(x):
-    x = torch.clamp(x, min=0.0, max=1.0)
-    x_pow = torch.pow(x, 2.2)
-    return x_pow / (1.0 - x_pow + 1e-8)  # Add epsilon to avoid divide-by-zero
+    """
+    Inverts gamma-compressed Reinhard tone mapping.
+    
+    Formula:
+        T⁻¹(t) = (t^γ) / (1 - t^γ)
+    
+    Args:
+        x (torch.Tensor): Tone-mapped image tensor, expected in [0, 1]
+    
+    Returns:
+        torch.Tensor: Reconstructed HDR image
+    """
+    gamma = 2.2
+    x = torch.clamp(x, min=0.0, max=1.0 - 1e-6)  # Clamp to avoid division by zero
+    x_pow = torch.pow(x, gamma)
+    return x_pow / (1.0 - x_pow + 1e-8)
