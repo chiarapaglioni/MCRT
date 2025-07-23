@@ -252,22 +252,28 @@ def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
     logger.info(f"Saved PSNR plot to {path}")
 
 
-def decode_pred_logits(pred_probs):
+def decode_pred_logits(probs, bin_edges):
     """
-    pred_probs: Tensor (B, 3, n_bins, H, W), probabilities already softmaxed
+    Convert predicted bin probabilities to expected radiance, per batch.
+
+    Args:
+        probs: (B, C, bins, H, W), softmax output from logits
+        bin_edges: (B, bins + 1), array of bin edges per batch
+
     Returns:
-      expected_rgb: Tensor (B, 3, H, W) with pixel values in [0, 1]
+        predicted_radiance: (B, C, H, W)
     """
-    _, _, bins, _, _ = pred_probs.shape
-    device = pred_probs.device
-
-    # Create bin centers from 0 to 1
-    bin_centers = torch.linspace(0, 1, bins, device=device).view(1, 1, bins, 1, 1)  # shape (1,1,bins,1,1)
-
-    # Expected value: sum over bins of probability * bin_center
-    expected_rgb = (pred_probs * bin_centers).sum(dim=2)  # sum over bins dimension -> (B,3,H,W)
-
-    return expected_rgb
+    # Compute bin centers per batch: shape (B, bins)
+    bin_centers = 0.5 * (bin_edges[:, :-1] + bin_edges[:, 1:])  # (B, bins)
+    
+    # Reshape to broadcast over C, H, W dimensions
+    # (B, 1, bins, 1, 1)
+    bin_centers = bin_centers.view(probs.shape[0], 1, -1, 1, 1)
+    
+    # Multiply probabilities with bin centers and sum over bins dimension
+    pred_radiance = (probs * bin_centers).sum(dim=2)  # (B, C, H, W)
+    
+    return pred_radiance
 
 
 def print_histogram_at_pixel(hist_tensor, x, y, used_bins):

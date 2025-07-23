@@ -6,7 +6,7 @@ from utils.utils import setup_logger
 from renderer.RenderingPipeline import generate_data
 from dataset.HistogramLoader import test_data_loader
 from model.DenoisingPipeline import train_model, evaluate_model
-from model.GenerativePipeline import train_histogram_generator, iterative_evaluate
+from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline
 
 logger = setup_logger()
 
@@ -50,7 +50,8 @@ def main():
     
     # GEN-EVAL (OK) <3
     elif task == "eval_gen":
-        iterative_evaluate(config)
+        # iterative_evaluate(config)
+        run_generative_accumulation_pipeline(config)
 
 if __name__ == "__main__":
     main()

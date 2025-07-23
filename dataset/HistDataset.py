@@ -36,6 +36,7 @@ class HistogramDataset(Dataset):
         self.hist_features = {}      # input histograms (from spp1 samples)
         self.target_histograms = {}  # target histograms (from clean image)
         self.clean_images = {}       # clean images for PSNR
+        self.bin_edges = {}
         self.scene_paths = {}
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
@@ -97,19 +98,23 @@ class HistogramDataset(Dataset):
             if input_hist_cache and os.path.exists(input_hist_cache) and not self.hist_regeneration:
                 cached = np.load(input_hist_cache)
                 input_hist = cached['features']
+                bin_edges = cached['bin_edges']
             else:
                 logger.info(f"Computing input histogram for scene {key}")
-                input_hist, _ = generate_histograms(input_samples, self.hist_bins, self.device)
+                # TODO: can be improved to store bin edges only for input scene since input and target belong to the same scene
+                input_hist, bin_edges = generate_histograms(input_samples, self.hist_bins, self.device)
                 logger.info(f"Generated input histogram of shape {input_hist.shape}")
                 input_hist = input_hist.astype(np.float32)
+                bin_edges = bin_edges.astype(np.float32)
                 if input_hist_cache:
-                    np.savez_compressed(input_hist_cache, features=input_hist)
+                    np.savez_compressed(input_hist_cache, features=input_hist, bin_edges=bin_edges)
 
             self.hist_features[key] = input_hist
+            self.bin_edges[key] = bin_edges
 
-            # TARGET HISTOGRAM (from target_samples or clean image if target_sample == 0)
+            # TARGET HISTOGRAM 
+            # (from target_samples or clean image if target_sample == 0)
             if self.target_sample == 0:
-                # Use clean image
                 logger.info(f"Using clean image as target for scene {key}")
                 samples = clean_img[None, ...]
             else:
@@ -118,15 +123,18 @@ class HistogramDataset(Dataset):
             if target_hist_cache and os.path.exists(target_hist_cache) and not self.hist_regeneration:
                 cached = np.load(target_hist_cache)
                 target_hist = cached['features']
+                bin_edges = cached['bin_edges']
             else:
                 logger.info(f"Computing target histogram for scene {key}")
-                target_hist, _ = generate_histograms(samples, self.hist_bins, self.device)
+                target_hist, bin_edges = generate_histograms(samples, self.hist_bins, self.device)
                 logger.info(f"Generated target histogram of shape {target_hist.shape}")
                 target_hist = target_hist.astype(np.float32)
+                bin_edges = bin_edges.astype(np.float32)
                 if target_hist_cache:
-                    np.savez_compressed(target_hist_cache, features=target_hist)
+                    np.savez_compressed(target_hist_cache, features=target_hist, bin_edges=bin_edges)
 
             self.target_histograms[key] = target_hist
+            # self.bin_edges[key] = bin_edges
 
 
     def __len__(self):
@@ -138,6 +146,15 @@ class HistogramDataset(Dataset):
         input_hist = self.hist_features[scene]
         target_hist = self.target_histograms[scene]
         clean_tensor = self.clean_images[scene]
+        bin_edges = self.bin_edges[scene]
+        bin_edges_tensor = torch.from_numpy(bin_edges).float()
+
+        # NORMALISATION
+        input_hist_sum = np.sum(input_hist, axis=-1, keepdims=True) + 1e-8
+        input_hist = input_hist / input_hist_sum            # shape (H, W, 3, B)
+
+        target_hist_sum = np.sum(target_hist, axis=-1, keepdims=True) + 1e-8
+        target_hist = target_hist / target_hist_sum         # shape (H, W, 3, B)
 
         input_tensor = torch.from_numpy(np.transpose(input_hist, (2, 3, 0, 1))).float()
         target_tensor = torch.from_numpy(np.transpose(target_hist, (2, 3, 0, 1))).float()
@@ -168,5 +185,6 @@ class HistogramDataset(Dataset):
             "target_hist": target_tensor,
             "clean": clean_tensor,
             "scene": scene,
+            "bin_edges": bin_edges_tensor,
             "crop_coords": (i, j, h, w) if self.crop_size else None
         }

@@ -35,6 +35,7 @@ class HistogramBinomDataset(Dataset):
         self.tonemap = tonemap
 
         # mean/std for normalisation
+        # try normalising by only diviing by the mean per image
         self.image_mean_std = {}  # (scene) -> (mean, std)
         self.global_mean = global_mean
         self.global_std = global_std

@@ -1,6 +1,7 @@
 # Evaluation Parameters
-model_path: checkpoints/20250718_hist2hist_dist.pth
-num_workers: 2
+model_path: checkpoints/20250723_hist2hist_dist_50ep.pth
+num_workers: 4
+num_samples: 10
 
 model:
   in_channels: 3

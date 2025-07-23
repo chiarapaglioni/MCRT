@@ -126,6 +126,10 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         optimizer.zero_grad()
         pred = model(hist)                      # 3, H, W
 
+        # TODO: try inverting the log right before feeding it to the loss!!
+        # - log applied to both input and target
+        # - invert loss right before the loss
+
         loss = criterion(pred, target)
         loss.backward()
         optimizer.step()
@@ -162,7 +166,6 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
 
             for i in range(pred.shape[0]):
                 # pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i])       # H, W, 3
-                # pred_i = boxcox_inverse(pred_i, lmbda=lamda[i].item()) 
                 
                 # Unstandardize prediction
                 if tonemap=='reinhard':
