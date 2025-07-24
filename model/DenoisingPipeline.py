@@ -115,7 +115,7 @@ def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda, tonemap
 
 
 # TRAINING STEP
-def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, debug=True):
+def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=None, debug=True):
     model.train()
     total_loss = 0
 
@@ -129,6 +129,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, epoch=None, deb
         # TODO: try inverting the log right before feeding it to the loss!!
         # - log applied to both input and target
         # - invert loss right before the loss
+        # Unstandardize prediction
+        if tonemap=='reinhard':
+            pred = reinhard_inverse(pred)
+        elif tonemap=='log':
+            pred = torch.expm1(pred)
 
         loss = criterion(pred, target)
         loss.backward()

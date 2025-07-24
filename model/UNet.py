@@ -169,8 +169,6 @@ class UNet(nn.Module):
         if self.mode == 'hist':
             B, C, bins, H, W = x.shape
             x = x.view(B, C * bins, H, W)
-            # reduce dimensionality before feeding input to the network
-            # x = self.input_proj(x)
 
         else:  # 'img' mode
             # input is already (B, 3, H, W)
@@ -193,7 +191,5 @@ class UNet(nn.Module):
         if self.out_mode == 'dist':
             B, _, H, W = out.shape
             out = out.view(B, 3, self.n_bins, H, W)
-            # do not apply softmax over bins here but outside!!
-            # out = F.softmax(out, dim=2) 
 
         return out

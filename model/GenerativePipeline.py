@@ -1,15 +1,17 @@
+# Torch
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
-
+# Utils
 import os
 import time
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
-from skimage.metrics import peak_signal_noise_ratio as psnr
-
+# Custom
 from model.UNet import UNet
 from dataset.HistDataset import HistogramDataset
 from utils.utils import save_loss_plot, decode_pred_logits, compute_psnr, save_psnr_plot
@@ -36,36 +38,53 @@ def get_generative_dataloaders(config):
     return train_loader, val_loader
 
 
-def train_generative_epoch(model, dataloader, optimizer, criterion, device, n_bins):
+def train_generative_epoch(model, dataloader, optimizer, device, n_bins, epoch):
     model.train()
     running_loss = 0.0
+    i = 0
 
     for batch in dataloader:
-        input_hist = batch['input_hist'].to(device)       # (B, C, bins, H, W)
-        target_bins = batch['target_hist'].to(device).long()  # (B, 3, H, W)
+        input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W)
+        target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
+        bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
 
         optimizer.zero_grad()
-        pred_logits = model(input_hist)                   # (B, 3, n_bins, H, W)
+        pred_logits = model(input_hist)                                 # (B, C, n_bins, H, W)
 
-        # Convert target from histogram to class labels
-        target_bins = torch.argmax(target_bins, dim=2)    # (B, 3, H, W)
+        # Rearrange predictions and targets for loss
+        pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()  # (B, C, H, W, n_bins)
+        target_hist = target_hist.permute(0, 1, 3, 4, 2).contiguous()  # (B, C, H, W, n_bins)
 
-        # Rearrange and flatten predictions
-        pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()  # (B, 3, H, W, n_bins)
-        pred_logits = pred_logits.view(-1, n_bins)                     # (B*3*H*W, n_bins)
-        target_bins = target_bins.view(-1)                             # (B*3*H*W,)
+        # Flatten to (N, n_bins) where N = B*C*H*W
+        pred_logits_flat = pred_logits.view(-1, n_bins)
+        target_hist_flat = target_hist.view(-1, n_bins)
 
-        loss = criterion(pred_logits, target_bins)
+        # Compute log probabilities
+        log_probs = F.log_softmax(pred_logits_flat, dim=1)
+
+        # KL divergence expects input=log_probs, target=probabilities
+        loss = F.kl_div(log_probs, target_hist_flat, reduction='batchmean')
 
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item()
 
+        if epoch==20:
+            plot_input_vs_prediction(
+                input_hist=batch["input_hist"],
+                pred_logits=model(batch["input_hist"].to(device)),
+                bin_edges=batch["bin_edges"],
+                device=device,
+                step_info=f"Epoch, Batch {i}",
+                clean_img=batch["clean"] if "clean" in batch else None
+            )
+        i += 1
+
     return running_loss / len(dataloader)
 
 
-def validate_generative_epoch(model, dataloader, criterion, device, n_bins):
+def validate_generative_epoch(model, dataloader, device, n_bins):
     model.eval()
     total_loss = 0.0
     total_psnr = 0.0
@@ -77,36 +96,45 @@ def validate_generative_epoch(model, dataloader, criterion, device, n_bins):
             target_hist = batch['target_hist'].to(device)
             bin_edges = batch['bin_edges'].to(device)
 
-            # Model prediction
-            pred_logits = model(input_hist)  # (B, 3, n_bins, H, W)
+            pred_logits = model(input_hist)
 
-            # Prepare target bin indices for CrossEntropyLoss
-            # We assume target_hist is a full histogram -> pick the most probable bin
-            # TODO: change to sample from the distribution
-            target_bins = torch.argmax(target_hist, dim=2).long()  # (B, 3, H, W)
+            pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()
+            target_hist = target_hist.permute(0, 1, 3, 4, 2).contiguous()
 
-            # Reshape for loss: CrossEntropy expects (N, C) and (N,)
-            pred_logits_reshaped = pred_logits.permute(0, 1, 3, 4, 2).reshape(-1, n_bins)  # [B * 3 * H * W, n_bins]
-            target_bins_reshaped = target_bins.view(-1)                                    # [B * 3 * H * W]
+            pred_logits_flat = pred_logits.view(-1, n_bins)
+            target_hist_flat = target_hist.view(-1, n_bins)
 
-            # Compute loss
-            loss = criterion(pred_logits_reshaped, target_bins_reshaped)
+            log_probs = F.log_softmax(pred_logits_flat, dim=1)
+            loss = F.kl_div(log_probs, target_hist_flat, reduction='batchmean')
             total_loss += loss.item()
 
-            # Decode to RGB for PSNR
-            probs = torch.softmax(pred_logits, dim=2)                   # (B, 3, n_bins, H, W)
-            pred_rgb = decode_pred_logits(probs, bin_edges)             # (B, 3, H, W)
-            target_rgb = decode_pred_logits(target_hist, bin_edges)
+            # Decode to RGB for PSNR calculation
+            probs = torch.softmax(pred_logits, dim=2).permute(0, 1, 4, 2, 3)  # (B, C, n_bins, H, W)
+            pred_rgb = decode_pred_logits(probs, bin_edges)
+            target_rgb = decode_pred_logits(target_hist.permute(0, 1, 4, 2, 3), bin_edges)
 
-            # PSNR per image
+            # DEBUG
+            if count == 0:  # log once per validation
+                input_rgb = decode_pred_logits(input_hist, bin_edges)
+                for name, rgb in [("Input", input_rgb), ("Target", target_rgb), ("Predicted", pred_rgb)]:
+                    means = rgb.mean(dim=(0, 2, 3))
+                    stds = rgb.std(dim=(0, 2, 3))
+                    mins = rgb.amin(dim=(0, 2, 3))
+                    maxs = rgb.amax(dim=(0, 2, 3))
+
+                    logger.info(f"{name} RGB Stats [Validation]")
+                    for c in range(3):
+                        logger.info(f"  Channel {c}: mean={means[c]:.4f}, std={stds[c]:.4f}, min={mins[c]:.4f}, max={maxs[c]:.4f}")
+
+            # TOTAL PSNR
             for i in range(pred_rgb.size(0)):
                 total_psnr += compute_psnr(pred_rgb[i], target_rgb[i])
                 count += 1
 
+
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count if count > 0 else 0.0
     return avg_loss, avg_psnr
-
 
 
 def train_histogram_generator(config):
@@ -129,6 +157,7 @@ def train_histogram_generator(config):
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    # TODO: test replacement by KL loss
     criterion = nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
@@ -136,7 +165,7 @@ def train_histogram_generator(config):
     psnr_values = []
 
     date_str = datetime.now().strftime("%Y-%m-%d")
-    model_name = f"{datetime.now().strftime('%Y%m%d')}_hist2hist_{model_cfg['out_mode']}.pth"
+    model_name = f"{datetime.now().strftime('%Y%m%d')}_hist2hist_{model_cfg['out_mode']}_{config['num_epochs']}ep.pth"
     save_path = Path(config["save_dir"]) / model_name
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -145,8 +174,8 @@ def train_histogram_generator(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_generative_epoch(model, train_loader, optimizer, criterion, device, n_bins)
-        val_loss, val_psnr = validate_generative_epoch(model, val_loader, criterion, device, n_bins)
+        train_loss = train_generative_epoch(model, train_loader, optimizer, device, n_bins, epoch)
+        val_loss, val_psnr = validate_generative_epoch(model, val_loader, device, n_bins)
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -159,35 +188,9 @@ def train_histogram_generator(config):
             torch.save(model.state_dict(), save_path)
             logger.info(f"Model saved to {save_path}")
 
-    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"hist2hist_loss_plot.png")
+    save_loss_plot(train_losses, val_losses, save_dir="plots", filename="hist2hist_loss_plot.png")
     save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_psnr_plot.png")
 
-
-
-def generative_accumulation_inference(model, initial_hist, bin_edges, num_steps=10, device='cuda'):
-    model.eval()
-    current_hist = initial_hist.clone().to(device)  # (1, C, bins, H, W)
-    
-    with torch.no_grad():
-        for step in range(num_steps):
-            logits = model(current_hist)               # (1, C, n_bins, H, W)
-            probs = torch.softmax(logits, dim=2)      # (1, C, n_bins, H, W)
-            
-            B, C, n_bins, H, W = probs.shape
-            probs_flat = probs.permute(0, 1, 3, 4, 2).reshape(-1, n_bins)  # (B*C*H*W, n_bins)
-            
-            # Sample bins
-            sampled_bins = torch.multinomial(probs_flat, num_samples=1).squeeze(1)  # (B*C*H*W,)
-            
-            sampled_one_hot = torch.nn.functional.one_hot(sampled_bins, num_classes=n_bins).float()
-            sampled_hist = sampled_one_hot.view(B, C, H, W, n_bins).permute(0, 1, 4, 2, 3).contiguous()
-            
-            current_hist += sampled_hist
-            
-            # Normalize histogram per pixel
-            current_hist = current_hist / current_hist.sum(dim=2, keepdim=True).clamp(min=1e-6)
-    
-    return current_hist
 
 
 def run_generative_accumulation_pipeline(config):
@@ -248,7 +251,7 @@ def run_generative_accumulation_pipeline(config):
                 B, C, n_bins, H, W = probs.shape
                 probs_flat = probs.permute(0, 1, 3, 4, 2).reshape(-1, n_bins)
                 sampled_bins = torch.multinomial(probs_flat, num_samples=1).squeeze(1)                      # kind of random can go to wrong bins
-                # sampled_bins = torch.argmax(probs, dim=2)  # shape: (B, C, H, W)                          # goes to mist probabable bin
+                # sampled_bins = torch.argmax(probs, dim=2)  # shape: (B, C, H, W)                          # goes to most probabable bin (wrong, too deterministic)
                 sampled_one_hot = torch.nn.functional.one_hot(sampled_bins, num_classes=n_bins).float()
 
                 # Reshape back to histogram format
@@ -263,9 +266,6 @@ def run_generative_accumulation_pipeline(config):
                 pred_rgb = decode_pred_logits(normalized_hist, bin_edges)
                 imgs_to_show.append(pred_rgb[0].cpu())
 
-        # Plot intermediate steps + ground truth
-        import matplotlib.pyplot as plt
-
         total_plots = num_steps + 1
         cols = min(6, total_plots)
         rows = (total_plots + cols - 1) // cols
@@ -275,13 +275,13 @@ def run_generative_accumulation_pipeline(config):
             psnr_val = compute_psnr(img, clean_img[0])
             plt.subplot(rows, cols, i + 1)
             plt.imshow(img.permute(1, 2, 0))
-            plt.title(f"Step {i+1} - PSNR {psnr_val}")
+            plt.title(f"Step {i+1} - PSNR {psnr_val:.2f}")
             plt.axis("off")
 
-        # Ground truth
+        # Ground Truth
         plt.subplot(rows, cols, total_plots)
         plt.imshow(clean_img[0].permute(1, 2, 0).cpu())
-        plt.title("Ground Truth")
+        plt.title("Ground Truth Image")
         plt.axis("off")
 
         plt.tight_layout()
@@ -291,14 +291,14 @@ def run_generative_accumulation_pipeline(config):
         print(f"Saved progressive generation plot to {save_path}")
 
 
-
-def iterative_evaluate(config, num_samples=4, num_steps=10):
+def iterative_evaluate(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Generating on {device}")
 
     dataset_cfg = config["dataset"]
     n_bins = dataset_cfg["hist_bins"]
-    num_samples = config['num_samples']
+    num_samples = config.get("num_samples", 4)
+    num_steps = config.get("num_steps", 10)
 
     dataset = HistogramDataset(**dataset_cfg)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=config['num_workers'], shuffle=False)
@@ -332,7 +332,7 @@ def iterative_evaluate(config, num_samples=4, num_steps=10):
 
         _, axs = plt.subplots(1, num_steps + 3, figsize=(4 * (num_steps + 2), 4))
 
-        axs[0].imshow(decode_pred_logits(input_hist, bin_edges).squeeze(0).permute(1, 2, 0).cpu().numpy())
+        axs[0].imshow(decode_pred_logits(input_hist, bin_edges)[0].permute(1, 2, 0).cpu())
         axs[0].set_title("Original Input Hist")
         axs[0].axis("off")
 
@@ -344,18 +344,18 @@ def iterative_evaluate(config, num_samples=4, num_steps=10):
             accumulated_radiance += (pred_radiance / num_steps)
 
             psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
-            axs[step].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
+            axs[step].imshow(accumulated_radiance[0].permute(1, 2, 0).cpu())
             axs[step].set_title(f"Step {step+1}\nPSNR: {psnr:.2f} dB")
             axs[step].axis("off")
 
         # Final Output
         final_psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
-        axs[num_steps + 1].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
+        axs[num_steps + 1].imshow(accumulated_radiance[0].permute(1, 2, 0).cpu())
         axs[num_steps + 1].set_title(f"Final Output\nPSNR: {final_psnr:.2f} dB")
         axs[num_steps + 1].axis("off")
 
         # Ground Truth
-        axs[num_steps + 2].imshow(clean_img[0].permute(1, 2, 0).detach().cpu().numpy())
+        axs[num_steps + 2].imshow(clean_img[0].permute(1, 2, 0).cpu())
         axs[num_steps + 2].set_title("Ground Truth")
         axs[num_steps + 2].axis("off")
 
@@ -364,3 +364,194 @@ def iterative_evaluate(config, num_samples=4, num_steps=10):
         plt.savefig(plot_path)
         plt.show()
         print(f"Saved plot to {plot_path}")
+
+
+def visualize_predictions(model, dataloader, device, num_samples=5):
+    model.eval()
+
+    with torch.no_grad():
+        count = 0
+        for batch in dataloader:
+            input_hist = batch['input_hist'].to(device)
+            target_hist = batch['target_hist'].to(device)
+            bin_edges = batch['bin_edges'].to(device)
+            clean = batch['clean']  # for comparison (optional)
+
+            pred_logits = model(input_hist)
+            probs = torch.softmax(pred_logits, dim=2)
+
+            input_rgb = decode_pred_logits(input_hist, bin_edges)
+            pred_rgb = decode_pred_logits(probs, bin_edges)
+            target_rgb = decode_pred_logits(target_hist, bin_edges)
+
+            psnr_input_clean = compute_psnr(input_rgb, clean)
+            psnr_pred_clean = compute_psnr(pred_rgb, clean)
+
+            B, C, _, H, W = input_hist.shape
+
+            for i in range(B):
+                # IMAGE PREDICTIONS
+                fig, axes = plt.subplots(1, 4, figsize=(12, 4))
+                axes[0].imshow(pred_rgb[i].cpu().permute(1, 2, 0))
+                axes[0].set_title(f'Predicted RGB {psnr_pred_clean}')
+                axes[1].imshow(target_rgb[i].cpu().permute(1, 2, 0))
+                axes[1].set_title('Target RGB')
+                axes[2].imshow(clean[i].cpu().permute(1, 2, 0))
+                axes[2].set_title('Clean (High SPP)')
+                axes[3].imshow(input_rgb[i].cpu().permute(1, 2, 0))
+                axes[3].set_title(f'Input RGB {psnr_input_clean}')
+
+                for ax in axes:
+                    ax.axis('off')
+                plt.tight_layout()
+                plt.show()
+
+                count += 1
+                if count >= num_samples:
+                    return
+
+def test_histogram_generator(config):
+    '''
+    Tests a single prediction of the generative pipeline given a noisy histogram as input. This way we see whether the model has learning anything from training.
+    '''
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Testing on {device}")
+
+    dataset_cfg = config["dataset"]
+    model_cfg = config["model"]
+    n_bins = dataset_cfg["hist_bins"]
+
+    # Load model
+    model = UNet(
+        in_channels=model_cfg["in_channels"],
+        n_bins=n_bins,
+        out_mode=model_cfg["out_mode"],
+        merge_mode=model_cfg["merge_mode"],
+        depth=model_cfg["depth"],
+        start_filters=model_cfg["start_filters"],
+        mode=dataset_cfg["mode"]
+    ).to(device)
+
+    model_path = config.get("model_path")
+    assert model_path is not None and os.path.exists(model_path), f"Model path '{model_path}' is invalid"
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    logger.info(f"Loaded model from {model_path}")
+
+    # Load validation set
+    _, val_loader = get_generative_dataloaders(config)
+
+    # Run visualization
+    num_samples = config.get("num_samples", 4)
+    visualize_predictions(model, val_loader, device, num_samples=num_samples)
+
+
+
+def visualize_predictions(model, dataloader, device, num_samples=5):
+    model.eval()
+
+    with torch.no_grad():
+        count = 0
+        for batch in dataloader:
+            input_hist = batch['input_hist'].to(device)
+            target_hist = batch['target_hist'].to(device)
+            bin_edges = batch['bin_edges'].to(device)
+            clean = batch['clean']  # for comparison (optional)
+
+            pred_logits = model(input_hist)
+            probs = torch.softmax(pred_logits, dim=2)
+
+            input_rgb = decode_pred_logits(input_hist, bin_edges)
+            pred_rgb = decode_pred_logits(probs, bin_edges)
+            target_rgb = decode_pred_logits(target_hist, bin_edges)
+
+            psnr_input_clean = compute_psnr(input_rgb, clean)
+            psnr_pred_clean = compute_psnr(pred_rgb, clean)
+
+            B, C, _, H, W = input_hist.shape
+
+            for i in range(B):
+                # IMAGE PREDICTIONS
+                fig, axes = plt.subplots(1, 4, figsize=(12, 4))
+                axes[0].imshow(pred_rgb[i].cpu().permute(1, 2, 0))
+                axes[0].set_title(f'Predicted RGB {psnr_pred_clean}')
+                axes[1].imshow(target_rgb[i].cpu().permute(1, 2, 0))
+                axes[1].set_title('Target RGB')
+                axes[2].imshow(clean[i].cpu().permute(1, 2, 0))
+                axes[2].set_title('Clean (High SPP)')
+                axes[3].imshow(input_rgb[i].cpu().permute(1, 2, 0))
+                axes[3].set_title(f'Input RGB {psnr_input_clean}')
+
+                for ax in axes:
+                    ax.axis('off')
+                plt.tight_layout()
+                plt.show()
+
+                count += 1
+                if count >= num_samples:
+                    return
+
+def test_histogram_generator(config):
+    '''
+    Tests a single prediction of the generative pipeline given a noisy histogram as input. This way we see whether the model has learning anything from training.
+    '''
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Testing on {device}")
+
+    dataset_cfg = config["dataset"]
+    model_cfg = config["model"]
+    n_bins = dataset_cfg["hist_bins"]
+
+    # Load model
+    model = UNet(
+        in_channels=model_cfg["in_channels"],
+        n_bins=n_bins,
+        out_mode=model_cfg["out_mode"],
+        merge_mode=model_cfg["merge_mode"],
+        depth=model_cfg["depth"],
+        start_filters=model_cfg["start_filters"],
+        mode=dataset_cfg["mode"]
+    ).to(device)
+
+    model_path = config.get("model_path")
+    assert model_path is not None and os.path.exists(model_path), f"Model path '{model_path}' is invalid"
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    logger.info(f"Loaded model from {model_path}")
+
+    # Load validation set
+    _, val_loader = get_generative_dataloaders(config)
+
+    # Run visualization
+    num_samples = config.get("num_samples", 4)
+    visualize_predictions(model, val_loader, device, num_samples=num_samples)
+
+
+def plot_input_vs_prediction(input_hist, pred_logits, bin_edges, device, step_info="", clean_img=None):
+    """
+    Plots decoded input vs prediction (and optionally the clean GT).
+    """
+    input_rgb = decode_pred_logits(input_hist.detach().cpu(), bin_edges.detach().cpu())
+    probs = torch.softmax(pred_logits.detach().cpu(), dim=2)
+    pred_rgb = decode_pred_logits(probs, bin_edges.cpu())
+
+    B = input_rgb.size(0)
+
+    for i in range(B):
+        fig, axes = plt.subplots(1, 3 if clean_img is not None else 2, figsize=(15, 5))
+
+        axes[0].imshow(input_rgb[i].permute(1, 2, 0))
+        axes[0].set_title("Input Histogram (decoded)")
+        axes[0].axis("off")
+
+        axes[1].imshow(pred_rgb[i].permute(1, 2, 0))
+        axes[1].set_title(f"Prediction {step_info}")
+        axes[1].axis("off")
+
+        if clean_img is not None:
+            axes[2].imshow(clean_img[i].cpu().permute(1, 2, 0))
+            axes[2].set_title("Ground Truth")
+            axes[2].axis("off")
+
+        plt.tight_layout()
+        plt.show()

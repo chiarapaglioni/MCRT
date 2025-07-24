@@ -93,6 +93,8 @@ class HistogramDataset(Dataset):
 
             input_samples = spp1_samples[:spp1_samples.shape[0] - self.target_sample]
             target_samples = spp1_samples[spp1_samples.shape[0] - self.target_sample:]
+            logger.info(f"Input Histogram Shape: {input_samples.shape}")
+            logger.info(f"Target Histogram Shape: {target_samples.shape}")
 
             # INPUT HISTOGRAM
             if input_hist_cache and os.path.exists(input_hist_cache) and not self.hist_regeneration:
@@ -101,7 +103,6 @@ class HistogramDataset(Dataset):
                 bin_edges = cached['bin_edges']
             else:
                 logger.info(f"Computing input histogram for scene {key}")
-                # TODO: can be improved to store bin edges only for input scene since input and target belong to the same scene
                 input_hist, bin_edges = generate_histograms(input_samples, self.hist_bins, self.device)
                 logger.info(f"Generated input histogram of shape {input_hist.shape}")
                 input_hist = input_hist.astype(np.float32)
@@ -123,10 +124,9 @@ class HistogramDataset(Dataset):
             if target_hist_cache and os.path.exists(target_hist_cache) and not self.hist_regeneration:
                 cached = np.load(target_hist_cache)
                 target_hist = cached['features']
-                bin_edges = cached['bin_edges']
             else:
                 logger.info(f"Computing target histogram for scene {key}")
-                target_hist, bin_edges = generate_histograms(samples, self.hist_bins, self.device)
+                target_hist, _ = generate_histograms(samples, self.hist_bins, self.device)
                 logger.info(f"Generated target histogram of shape {target_hist.shape}")
                 target_hist = target_hist.astype(np.float32)
                 bin_edges = bin_edges.astype(np.float32)
@@ -134,7 +134,6 @@ class HistogramDataset(Dataset):
                     np.savez_compressed(target_hist_cache, features=target_hist, bin_edges=bin_edges)
 
             self.target_histograms[key] = target_hist
-            # self.bin_edges[key] = bin_edges
 
 
     def __len__(self):
