@@ -1,23 +1,23 @@
 dataset:
   root_dir: output                      # Raw dataset location
-  cached_dir: histograms                # Cached histograms are saved
+  cached_dir: ../histograms                # Cached histograms are saved
   crop_size: 128
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
   mode: hist                            # Options: 'hist' for hist2hist
   data_augmentation: true
-  virt_size: 400
+  virt_size: 800
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
   hist_regeneration: false
-  target_sample: 8
+  target_sample: 30
 
 model:
   in_channels: 3
   out_mode: dist                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 3
+  depth: 4
   start_filters: 32
   learning_rate: 1e-4
 
@@ -27,8 +27,8 @@ num_workers: 4
 shuffle: true
 pin_memory: false
 
-val_split: 0.2  # 10% validation split
+val_split: 0.15  # 10% validation split
 
 # training
-num_epochs: 50
+num_epochs: 20
 save_dir: checkpoints

@@ -25,4 +25,4 @@ dataset:
   clean: true
   debug: false
   supervised: true
-  tonemap: log
+  tonemap: reinhard                      # 'log' or 'reinhard' or 'none'

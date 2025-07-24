@@ -30,7 +30,6 @@ def get_data_loaders(config):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
-    # TODO: finish testing global standardisation !!!
     gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
@@ -120,16 +119,16 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
-        hist = batch['input'].to(device)        # B, 3, H, W
-        target = batch['target'].to(device)     # 3, H, W
+        hist = batch['input'].to(device)        # B, 3, H, W        (in log space)
+        target = batch['target'].to(device)     # 3, H, W           (in original space)
 
         optimizer.zero_grad()
         pred = model(hist)                      # 3, H, W
 
-        # TODO: try inverting the log right before feeding it to the loss!!
+        # TODO: try inverting the prediction from log to original space right before feeding it to the loss!!
         # - log applied to both input and target
-        # - invert loss right before the loss
-        # Unstandardize prediction
+        # - invert target to original right before the loss
+        # NOT WORKING :)))))))
         if tonemap=='reinhard':
             pred = reinhard_inverse(pred)
         elif tonemap=='log':
@@ -142,8 +141,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         total_loss += loss.item()
 
         # Plot the first batch in the first epoch for debugging
-        if debug and epoch==10:
-            # plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, image_mean=batch['mean'], image_std=batch['std'], lamda=batch['lambda'])
+        if debug and epoch==5:
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
     return total_loss / len(dataloader)
@@ -161,17 +159,12 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             hist = batch['input'].to(device)            # B, 3, H, W
             target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)           # B, 3, H, W
-            # image_mean = batch['mean'].to(device)       # 3, 1, 1
-            # image_std = batch['std'].to(device)         # 3, 1, 1
-            # lamda = batch['lambda'].to(device)          # 3, 1, 1
 
             pred = model(hist)                          # B, 3, H, W
             loss = criterion(pred, target)
             total_loss += loss.item()
 
-            for i in range(pred.shape[0]):
-                # pred_i = unstandardize_tensor(pred[i], image_mean[i], image_std[i])       # H, W, 3
-                
+            for i in range(pred.shape[0]):                
                 # Unstandardize prediction
                 if tonemap=='reinhard':
                     pred_i = reinhard_inverse(pred[i])
@@ -277,7 +270,7 @@ def train_model(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, epoch, debug=dataset_cfg['debug'])
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], epoch=epoch, debug=dataset_cfg['debug'])
         val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'])
 
         train_losses.append(train_loss)
@@ -340,10 +333,6 @@ def evaluate_model(config):
         if clean is not None:
             clean = clean.to(device)
         scene = hist_sample["scene"]
-        # mean = hist_sample["mean"]
-        # std = hist_sample["std"]
-        # lmbda = hist_sample["lambda"]
-        # eps = hist_sample["epsilon"]
 
         # Evaluate models
         hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None, tonemap=dataset_cfg['tonemap'])

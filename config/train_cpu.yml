@@ -5,30 +5,30 @@ dataset:
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
-  mode: hist                             # Options: 'hist' for hist2noise or 'img' for noise2noise
+  mode: img                             # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
-  virt_size: 500
+  virt_size: 100
   clean: true                           # Whether to include 'clean' targets if available
-  debug: true
+  debug: false
   hist_regeneration: true
-  supervised: true                      # if true supervised else self supervised
-  tonemap: log                          # 'log' or 'reinhard'
+  supervised: false                     # if true supervised else self supervised
+  tonemap: reinhard                     # 'log' or 'reinhard' or 'none'
 
 model:
   in_channels: 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 3
+  depth: 4
   start_filters: 32  
   learning_rate: 1e-4
 
 # General DataLoader settings
 batch_size: 32
-num_workers: 2
+num_workers: 4
 shuffle: true
 pin_memory: false
-standardisation: global               # TODO: add support to toggle on/off log norm
-loss: mse                             # 'rmse' or 'lhdr' when output is not tonemapped
+standardisation: global                 # TODO: add support to toggle on/off log norm
+loss: lhdr                              # 'rmse' or 'lhdr' when output is not tonemapped
 
 val_split: 0.2  # 10% validation split (bigger val better for model performance)
 

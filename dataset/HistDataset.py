@@ -6,6 +6,8 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
+from dataset.HistogramGeneratorZero import generate_histograms_with_zero_bin
+
 
 import logging
 logger = logging.getLogger(__name__)
@@ -64,6 +66,9 @@ class HistogramDataset(Dataset):
 
         assert self.scene_names, f"No scenes found in {self.root_dir}"
         logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
+        logger.info(f"Input Histogram Counts: {self.low_spp - self.target_sample}")
+        logger.info(f"Target Histogram Counts: {self.target_sample}")
+        logger.info(f"Histogram Bins: {self.hist_bins}")
 
         for key, folder in scene_keys:
             # Load spp1 samples (32 samples, shape: (32, H, W, 3))
@@ -93,8 +98,6 @@ class HistogramDataset(Dataset):
 
             input_samples = spp1_samples[:spp1_samples.shape[0] - self.target_sample]
             target_samples = spp1_samples[spp1_samples.shape[0] - self.target_sample:]
-            logger.info(f"Input Histogram Shape: {input_samples.shape}")
-            logger.info(f"Target Histogram Shape: {target_samples.shape}")
 
             # INPUT HISTOGRAM
             if input_hist_cache and os.path.exists(input_hist_cache) and not self.hist_regeneration:
@@ -103,7 +106,8 @@ class HistogramDataset(Dataset):
                 bin_edges = cached['bin_edges']
             else:
                 logger.info(f"Computing input histogram for scene {key}")
-                input_hist, bin_edges = generate_histograms(input_samples, self.hist_bins, self.device)
+                # input_hist, bin_edges = generate_histograms(input_samples, self.hist_bins, self.device)
+                input_hist, bin_edges = generate_histograms_with_zero_bin(input_samples, self.hist_bins, self.device)
                 logger.info(f"Generated input histogram of shape {input_hist.shape}")
                 input_hist = input_hist.astype(np.float32)
                 bin_edges = bin_edges.astype(np.float32)
@@ -126,7 +130,8 @@ class HistogramDataset(Dataset):
                 target_hist = cached['features']
             else:
                 logger.info(f"Computing target histogram for scene {key}")
-                target_hist, _ = generate_histograms(samples, self.hist_bins, self.device)
+                # target_hist, _ = generate_histograms(samples, self.hist_bins, self.device)
+                target_hist, _ = generate_histograms_with_zero_bin(samples, self.hist_bins, self.device)
                 logger.info(f"Generated target histogram of shape {target_hist.shape}")
                 target_hist = target_hist.astype(np.float32)
                 bin_edges = bin_edges.astype(np.float32)

@@ -11,8 +11,8 @@ dataset:
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
   hist_regeneration: true
-  supervised: true
-  tonemap: log                          # 'log' or 'reinhard'
+  supervised: false
+  tonemap: none                          # 'log' or 'reinhard'
 
 model:
   in_channels: 3
@@ -27,9 +27,8 @@ batch_size: 32
 num_workers: 10
 shuffle: true
 pin_memory: false
-loss: mse                             # 'rmse' or 'lhdr' when output is not tonemapped
-tonemap: reinhard                     # 'log' or 'reinhard'
-standardisation: global               # TODO: add support to toggle on/off log norm
+loss: lhdr                              # 'rmse' or 'lhdr' when output is not tonemapped
+standardisation: global                 # TODO: add support to toggle on/off log norm
 
 val_split: 0.2  # 10% validation split
 

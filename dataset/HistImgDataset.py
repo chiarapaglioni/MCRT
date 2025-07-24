@@ -180,12 +180,18 @@ class HistogramBinomDataset(Dataset):
             elif self.tonemap == 'reinhard':
                 input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
                 input_tensor = reinhard_tonemap(input_tensor)
+            else: # alway apply reinhard as default!
+                input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
+                input_tensor = reinhard_tonemap(input_tensor)
         
         if self.supervised:
             if self.tonemap == 'log':
                 target_tensor = torch.log1p(clean_tensor)                   # shape: (3, H, W)
             elif self.tonemap == 'reinhard':
                 target_tensor = reinhard_tonemap(clean_tensor)
+            else: 
+                # do not apply log transformation to target sample
+                target_tensor = torch.from_numpy(clean_tensor).float()      
         else: 
             if self.tonemap == 'log':
                 target_sample = np.log1p(target_sample)                     # shape: (3, H, W)
@@ -193,6 +199,9 @@ class HistogramBinomDataset(Dataset):
             elif self.tonemap == 'reinhard':
                 target_sample = torch.from_numpy(target_sample).float()     # shape: (3, H, W)
                 target_tensor = reinhard_tonemap(target_sample)
+            else: 
+                # do not apply log transformation to target sample
+                target_tensor = torch.from_numpy(target_sample).float()                               # shape: (3, H, W)
 
         # CROP
         if self.crop_size:

@@ -252,6 +252,28 @@ def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
     logger.info(f"Saved PSNR plot to {path}")
 
 
+# def decode_pred_logits(probs, bin_edges):
+#     """
+#     Convert predicted bin probabilities to expected radiance, per batch.
+
+#     Args:
+#         probs: (B, C, bins, H, W), softmax output from logits
+#         bin_edges: (B, bins + 1), array of bin edges per batch
+
+#     Returns:
+#         predicted_radiance: (B, C, H, W)
+#     """
+#     # Compute bin centers per batch: shape (B, bins)
+#     bin_centers = 0.5 * (bin_edges[:, :-1] + bin_edges[:, 1:])  # (B, bins)
+    
+#     # Reshape to broadcast over C, H, W dimensions
+#     # (B, 1, bins, 1, 1)
+#     bin_centers = bin_centers.view(probs.shape[0], 1, -1, 1, 1)
+    
+#     # Multiply probabilities with bin centers and sum over bins dimension
+#     pred_radiance = (probs * bin_centers).sum(dim=2)  # (B, C, H, W)
+    
+#     return pred_radiance
 def decode_pred_logits(probs, bin_edges):
     """
     Convert predicted bin probabilities to expected radiance, per batch.
@@ -266,6 +288,9 @@ def decode_pred_logits(probs, bin_edges):
     # Compute bin centers per batch: shape (B, bins)
     bin_centers = 0.5 * (bin_edges[:, :-1] + bin_edges[:, 1:])  # (B, bins)
     
+    # Set first bin center explicitly to 0 for the zero bin
+    bin_centers[:, 0] = 0.0
+    
     # Reshape to broadcast over C, H, W dimensions
     # (B, 1, bins, 1, 1)
     bin_centers = bin_centers.view(probs.shape[0], 1, -1, 1, 1)
@@ -274,6 +299,7 @@ def decode_pred_logits(probs, bin_edges):
     pred_radiance = (probs * bin_centers).sum(dim=2)  # (B, C, H, W)
     
     return pred_radiance
+
 
 
 def print_histogram_at_pixel(hist_tensor, x, y, used_bins):
