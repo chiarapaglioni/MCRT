@@ -126,7 +126,7 @@ class UNet(nn.Module):
             if out_mode == 'dist':
                 self.input_channels = in_channels * n_bins          # original histogram
             elif out_mode == 'mean':
-                self.input_channels = in_channels * (n_bins + 2)    # bins + mean + var
+                self.input_channels = in_channels * n_bins # (n_bins + 2)    # bins + mean + var
             else:
                 raise ValueError(f"Unsupported out_mode: {out_mode}")
         else:  # 'img' mode

@@ -7,17 +7,17 @@ dataset:
   hist_bins: 16
   mode: hist                            # Options: 'hist' for hist2hist
   data_augmentation: true
-  virt_size: 800
+  virt_size: 100
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
   hist_regeneration: false
-  target_sample: 30
+  target_sample: 2
 
 model:
   in_channels: 3
   out_mode: dist                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 4
+  depth: 3
   start_filters: 32
   learning_rate: 1e-4
 

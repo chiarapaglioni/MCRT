@@ -157,8 +157,8 @@ class HistogramBinomDataset(Dataset):
             hist_norm = self.hist_features[scene]               # (H, W, 3, bins)
 
             input_samples_tensor = torch.from_numpy(input_samples).float()  # (N-1, 3, H, W)
-            mean = input_samples_tensor.mean(dim=0)  # (3, H, W)
-            std = input_samples_tensor.std(dim=0)    # (3, H, W)
+            mean = input_samples_tensor.mean(dim=0)         # (3, H, W)
+            std = input_samples_tensor.std(dim=0)           # (3, H, W)
 
             # TONEMAP
             if self.tonemap == 'log':
@@ -170,7 +170,9 @@ class HistogramBinomDataset(Dataset):
 
             # Histogram from numpy → torch, (H, W, 3, bins) → (3, bins, H, W)
             hist_torch = torch.from_numpy(hist_norm).permute(2, 3, 0, 1).float()
-            input_tensor = torch.cat([hist_torch, mean_t, std_t], dim=1)  # (3, bins+2, H, W)
+            # input_tensor = torch.cat([hist_torch, mean_t, std_t], dim=1)  # (3, bins+2, H, W)
+            # TODO: only train network to map normalised hist to noisy image
+            input_tensor = hist_torch
         
         else:
             input_avg = input_samples.mean(axis=0)  # (3, H, W)

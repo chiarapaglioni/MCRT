@@ -7,19 +7,19 @@ from torch.utils.data import DataLoader
 # Utils
 import os
 import time
-import numpy as np
 from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 # Custom
 from model.UNet import UNet
 from dataset.HistDataset import HistogramDataset
-from utils.utils import save_loss_plot, decode_pred_logits, compute_psnr, save_psnr_plot
+from utils.utils import save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot
 
 import logging
 logger = logging.getLogger(__name__)
 
 
+# DATA LOADERS
 def get_generative_dataloaders(config):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
@@ -41,34 +41,8 @@ def get_generative_dataloaders(config):
     return train_loader, val_loader
 
 
-class CustomCrossEntropyLoss(nn.Module):
-    def __init__(self, reduction='mean'):
-        super().__init__()
-        self.reduction = reduction
-
-    def forward(self, pred_logits, target_probs):
-        """
-        Args:
-            pred_logits: (N, n_bins) unnormalized logits predicted by your model
-            target_probs: (N, n_bins) target histograms (normalized to sum=1)
-        
-        Returns:
-            Scalar loss value
-        """
-        log_probs = F.log_softmax(pred_logits, dim=1)  # (N, n_bins)
-        
-        # Cross entropy: -sum(target * log(predicted)) per sample
-        ce_loss = -(target_probs * log_probs).sum(dim=1)  # (N,)
-        
-        if self.reduction == 'mean':
-            return ce_loss.mean()
-        elif self.reduction == 'sum':
-            return ce_loss.sum()
-        else:
-            return ce_loss  # no reduction
-
-
-def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins, epoch):
+# TRAINING STEP - RESIDUAL
+def train_residual_epoch(model, loss_fn, dataloader, optimizer, device, n_bins, epoch):
     model.train()
     running_loss = 0.0
     i = 0
@@ -110,8 +84,8 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
     return running_loss / len(dataloader)
 
 
-
-def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
+# VALIDATION STEP - RESIDUAL
+def validate_residual_epoch(model, loss_fn, dataloader, device, n_bins):
     model.eval()
     total_loss = 0.0
     total_psnr = 0.0
@@ -123,7 +97,6 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
             target_hist = batch['target_hist'].to(device) - input_hist      # residual histogram (already normalized)
             clean_img = batch['clean'].to(device)                           # (B, C, H, W)
             bin_edges = batch['bin_edges'].to(device)
-            scene_name = batch['scene']
 
             # Forward pass
             pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
@@ -152,9 +125,9 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
             target_hist_reconstructed = target_hist_reconstructed / (target_hist_reconstructed.sum(dim=2, keepdim=True) + 1e-8)
 
             # Decode histograms to RGB
-            input_rgb_img = decode_pred_logits(input_hist, bin_edges)
-            target_rgb_img = decode_pred_logits(target_hist_reconstructed, bin_edges)
-            pred_rgb_img = decode_pred_logits(pred_hist_reconstructed, bin_edges)
+            input_rgb_img = decode_image_from_probs(input_hist, bin_edges)
+            target_rgb_img = decode_image_from_probs(target_hist_reconstructed, bin_edges)
+            pred_rgb_img = decode_image_from_probs(pred_hist_reconstructed, bin_edges)
 
             # DEBUG logging
             if count % 5 == 0:
@@ -179,6 +152,134 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
     return avg_loss, avg_psnr
 
 
+# TRAIN STEP - DISTRIBUTION
+def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins, epoch):
+    model.train()
+    running_loss = 0.0
+    i = 0
+
+    for batch in dataloader:
+        input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
+        target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
+        bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+
+        optimizer.zero_grad()
+        pred_logits = model(input_hist)                                 # (B, C, n_bins, H, W)
+
+        # Rearrange predictions and targets for loss
+        pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()   # (B, C, H, W, n_bins)
+        target_hist = target_hist.permute(0, 1, 3, 4, 2).contiguous()   # (B, C, H, W, n_bins)
+
+        # Flatten to (N, n_bins) where N = B*C*H*W
+        pred_logits_flat = pred_logits.view(-1, n_bins)                 # (B*C*H*W, n_bins)
+        target_hist_flat = target_hist.view(-1, n_bins)                 # (B*C*H*W, n_bins)
+
+        loss = loss_fn(pred_logits_flat, target_hist_flat)
+
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+        if epoch>=100:
+            plot_input_vs_prediction(
+                input_hist=input_hist,
+                residual=pred_logits.permute(0, 1, 4, 2, 3).detach().cpu(),  # (B, C, bins, H, W)
+                bin_edges=bin_edges.detach().cpu(),
+                device=device,
+                step_info=f"Epoch, Batch {i}",
+                clean_img=batch["clean"] if "clean" in batch else None
+            )
+        i += 1
+
+    return running_loss / len(dataloader)
+
+
+# VALIDATION STEP - DISTRIBUTION
+def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
+    model.eval()
+    total_loss = 0.0
+    total_psnr = 0.0
+    count = 0
+
+    with torch.no_grad():
+        for batch in dataloader:
+            input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
+            target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
+            clean_img = batch['clean'].to(device)                           # (B, C, H, W)
+            bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+
+            # Forward pass
+            pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
+
+            # Prepare shapes for loss
+            pred_logits_flat = pred_logits.permute(0, 1, 3, 4, 2).contiguous().view(-1, n_bins)  # (N, bins)
+            target_hist_flat = target_hist.permute(0, 1, 3, 4, 2).contiguous().view(-1, n_bins)  # (N, bins)
+
+            # Compute cross entrpy loss between logits out from network and target distribution
+            loss = loss_fn(pred_logits_flat, target_hist_flat)
+            total_loss += loss.item()
+
+            # Decode histograms to RGB
+            pred_probs = torch.softmax(pred_logits, dim=2)
+            pred_rgb_img = decode_image_from_probs(pred_probs, bin_edges)   # (B, C, H, W)
+
+            # DEBUG logging
+            if count % 5 == 0:
+                # print dist stats
+                x, y = 50, 50
+                logger.info(f"Input Dist: {input_hist[0, 0, :, x, y]}")
+                logger.info(f"Target Dist: {target_hist[0, 0, :, x, y]}")
+                logger.info(f"Pred Dist: {pred_probs[0, 0, :, x, y]}")
+
+                # print image stats (pred)
+                means = pred_rgb_img.mean(dim=[0, 2, 3])  # Mean over batch, height, width per channel
+                stds = pred_rgb_img.std(dim=[0, 2, 3])    # Std over batch, height, width per channel
+                mins = pred_rgb_img.amin(dim=[0, 2, 3])   # Min per channel
+                maxs = pred_rgb_img.amax(dim=[0, 2, 3])   # Max per channel
+
+                for c in range(3):
+                    logger.info(f"  Channel {c}: mean={means[c].item():.4f}, std={stds[c].item():.4f}, min={mins[c].item():.4f}, max={maxs[c].item():.4f}")
+
+            # Compute PSNR
+            for i in range(pred_rgb_img.size(0)):
+                total_psnr += compute_psnr(pred_rgb_img[i], clean_img[i])
+                count += 1
+
+    avg_loss = total_loss / len(dataloader)
+    avg_psnr = total_psnr / count if count > 0 else 0.0
+    return avg_loss, avg_psnr
+
+
+# CROSS ENTROPY LOSS FUNCTION
+class CustomCrossEntropyLoss(nn.Module):
+    def __init__(self, reduction='mean'):
+        super().__init__()
+        self.reduction = reduction
+
+    def forward(self, pred_logits, target_probs):
+        """
+        Args:
+            pred_logits: (N, n_bins) unnormalized logits predicted by your model
+            target_probs: (N, n_bins) target histograms (normalized to sum=1)
+        
+        Returns:
+            Scalar loss value
+        """
+        log_probs = F.log_softmax(pred_logits, dim=1)           # (N, n_bins)
+        
+        # Cross entropy: -sum(target * log(predicted)) per sample
+        ce_loss = -(target_probs * log_probs).sum(dim=1)        # (N,)
+        
+        if self.reduction == 'mean':
+            return ce_loss.mean()
+        elif self.reduction == 'sum':
+            return ce_loss.sum()
+        else:
+            return ce_loss
+
+
+# TRAINING LOOP - DISTRIBUTION
 def train_histogram_generator(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Training on {device}")
@@ -199,8 +300,7 @@ def train_histogram_generator(config):
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
-    # loss_fn = CustomCrossEntropyLoss()
-    loss_fn = nn.MSELoss()
+    loss_fn = CustomCrossEntropyLoss()
 
     best_val_loss = float("inf")
     train_losses, val_losses = [], []
@@ -230,11 +330,66 @@ def train_histogram_generator(config):
             torch.save(model.state_dict(), save_path)
             logger.info(f"Model saved to {save_path}")
 
-    save_loss_plot(train_losses, val_losses, save_dir="plots", filename="hist2hist_loss_plot.png")
-    save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_psnr_plot.png")
+    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_hist2hist_dist_loss_plot.png")
+    save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_dist_psnr_plot.png")
 
 
+# TRAINING LOOP - RESIDUAL
+def train_histogram_residual(config):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Training on {device}")
 
+    train_loader, val_loader = get_generative_dataloaders(config)
+    dataset_cfg = config["dataset"]
+    model_cfg = config["model"]
+    n_bins = dataset_cfg["hist_bins"]
+
+    model = UNet(
+        in_channels=model_cfg["in_channels"],
+        n_bins=n_bins,
+        out_mode=model_cfg["out_mode"],
+        merge_mode=model_cfg["merge_mode"],
+        depth=model_cfg["depth"],
+        start_filters=model_cfg["start_filters"],
+        mode=dataset_cfg["mode"]
+    ).to(device)
+
+    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    loss_fn = nn.MSELoss()
+
+    best_val_loss = float("inf")
+    train_losses, val_losses = [], []
+    psnr_values = []
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    model_name = f"{datetime.now().strftime('%Y%m%d')}_hist2hist_{model_cfg['out_mode']}_{config['num_epochs']}ep.pth"
+    save_path = Path(config["save_dir"]) / model_name
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger.info("Starting training...")
+
+    for epoch in range(config["num_epochs"]):
+        start_time = time.time()
+
+        train_loss = train_residual_epoch(model, loss_fn, train_loader, optimizer, device, n_bins, epoch)
+        val_loss, val_psnr = validate_residual_epoch(model, loss_fn, val_loader, device, n_bins)
+
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        psnr_values.append(val_psnr)
+
+        logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | PSNR: {val_psnr:.2f} dB | Time: {time.time() - start_time:.2f}s")
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), save_path)
+            logger.info(f"Model saved to {save_path}")
+
+    save_loss_plot(train_losses, val_losses, save_dir="plots", filename=f"{date_str}_hist2hist_residual_oss_plot.png")
+    save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_residual_psnr_plot.png")
+
+
+# GENERATIVE ACCUMULATION - INFERENCE
 def run_generative_accumulation_pipeline(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {device}")
@@ -282,7 +437,7 @@ def run_generative_accumulation_pipeline(config):
         imgs_to_show = []
 
         with torch.no_grad():
-            for step in range(num_steps):
+            for _ in range(num_steps):
                 # Normalize before feeding into model
                 normalized_hist = current_hist / photon_count.clamp(min=1e-6)
 
@@ -305,7 +460,7 @@ def run_generative_accumulation_pipeline(config):
 
                 # Decode to RGB using normalized histogram
                 normalized_hist = current_hist / photon_count.clamp(min=1e-6)
-                pred_rgb = decode_pred_logits(normalized_hist, bin_edges)
+                pred_rgb = decode_image_from_probs(normalized_hist, bin_edges)
                 imgs_to_show.append(pred_rgb[0].cpu())
 
         total_plots = num_steps + 1
@@ -374,14 +529,14 @@ def iterative_evaluate(config):
 
         _, axs = plt.subplots(1, num_steps + 3, figsize=(4 * (num_steps + 2), 4))
 
-        axs[0].imshow(decode_pred_logits(input_hist, bin_edges)[0].permute(1, 2, 0).cpu())
+        axs[0].imshow(decode_image_from_probs(input_hist, bin_edges)[0].permute(1, 2, 0).cpu())
         axs[0].set_title("Original Input Hist")
         axs[0].axis("off")
 
         for step in range(1, num_steps+1):
             logits = model(input_hist)
             probs = torch.softmax(logits, dim=2)
-            pred_radiance = decode_pred_logits(probs, bin_edges)
+            pred_radiance = decode_image_from_probs(probs, bin_edges)
 
             accumulated_radiance += (pred_radiance / num_steps)
 
@@ -444,19 +599,19 @@ def visualize_predictions(model, dataloader, device, num_samples=5):
             target_hist_reconstructed = target_hist_reconstructed / (target_hist_reconstructed.sum(dim=2, keepdim=True) + 1e-8)
 
             # Decode histograms to RGB images
-            input_rgb_img = decode_pred_logits(input_hist, bin_edges)                 # (B,C,H,W)
-            target_rgb_img = decode_pred_logits(target_hist_reconstructed, bin_edges) # (B,C,H,W)
-            pred_rgb_img = decode_pred_logits(pred_hist_reconstructed, bin_edges)     # (B,C,H,W)
+            input_rgb_img = decode_image_from_probs(input_hist, bin_edges)                 # (B,C,H,W)
+            target_rgb_img = decode_image_from_probs(target_hist_reconstructed, bin_edges) # (B,C,H,W)
+            pred_rgb_img = decode_image_from_probs(pred_hist_reconstructed, bin_edges)     # (B,C,H,W)
 
             # Compute PSNR with clean images
             psnr_input_clean = compute_psnr(input_rgb_img, clean.to(device))
             psnr_pred_clean = compute_psnr(pred_rgb_img, clean.to(device))
 
-            B, C, _, H, W = input_hist.shape
+            B, _, _, _, _ = input_hist.shape
 
             for i in range(B):
                 # IMAGE PREDICTIONS
-                fig, axes = plt.subplots(1, 4, figsize=(12, 4))
+                _, axes = plt.subplots(1, 4, figsize=(12, 4))
                 axes[0].imshow(pred_rgb_img[i].cpu().permute(1, 2, 0))
                 axes[0].set_title(f'Predicted RGB {psnr_pred_clean}')
                 axes[1].imshow(target_rgb_img[i].cpu().permute(1, 2, 0))
@@ -474,41 +629,6 @@ def visualize_predictions(model, dataloader, device, num_samples=5):
                 count += 1
                 if count >= num_samples:
                     return
-
-def test_histogram_generator(config):
-    '''
-    Tests a single prediction of the generative pipeline given a noisy histogram as input. This way we see whether the model has learning anything from training.
-    '''
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Testing on {device}")
-
-    dataset_cfg = config["dataset"]
-    model_cfg = config["model"]
-    n_bins = dataset_cfg["hist_bins"]
-
-    # Load model
-    model = UNet(
-        in_channels=model_cfg["in_channels"],
-        n_bins=n_bins,
-        out_mode=model_cfg["out_mode"],
-        merge_mode=model_cfg["merge_mode"],
-        depth=model_cfg["depth"],
-        start_filters=model_cfg["start_filters"],
-        mode=dataset_cfg["mode"]
-    ).to(device)
-
-    model_path = config.get("model_path")
-    assert model_path is not None and os.path.exists(model_path), f"Model path '{model_path}' is invalid"
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
-    logger.info(f"Loaded model from {model_path}")
-
-    # Load validation set
-    _, val_loader = get_generative_dataloaders(config)
-
-    # Run visualization
-    num_samples = config.get("num_samples", 4)
-    visualize_predictions(model, val_loader, device, num_samples=num_samples)
 
 
 def test_histogram_generator(config):
@@ -570,18 +690,17 @@ def plot_input_vs_prediction(input_hist, residual, bin_edges, device, step_info=
     pred_hist_reconstructed = pred_hist_reconstructed / (pred_hist_reconstructed.sum(dim=2, keepdim=True) + 1e-8)
 
     # Decode histograms to RGB images
-    input_rgb_img = decode_pred_logits(input_hist, bin_edges)                 # (B,C,H,W)
-    pred_rgb_img = decode_pred_logits(pred_hist_reconstructed, bin_edges)     # (B,C,H,W)
+    input_rgb_img = decode_image_from_probs(input_hist, bin_edges)                 # (B,C,H,W)
+    pred_rgb_img = decode_image_from_probs(pred_hist_reconstructed, bin_edges)     # (B,C,H,W)
 
     psnr_input = compute_psnr(input_rgb_img, clean_img)
     psnr_pred = compute_psnr(pred_rgb_img, clean_img)
 
-    B = input_rgb_img.size(0)
     num_imgs = 5
 
     for i in range(num_imgs):
         n_cols = 3 if clean_img is not None else 2
-        fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
+        _, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
 
         axes[0].imshow(input_rgb_img[i].permute(1, 2, 0))
         axes[0].set_title(f"Input Histogram - PSNR {psnr_input}")

@@ -88,7 +88,7 @@ def get_sample(dataset, idx=0, device='cpu'):
     return input_tensor, target, noisy, clean
 
 
-def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda, tonemap):
+def evaluate_sample(model, input_tensor, clean_tensor, tonemap):
     with torch.no_grad():
         pred = model(input_tensor).squeeze(0)
         clean = clean_tensor
@@ -98,17 +98,14 @@ def evaluate_sample(model, input_tensor, clean_tensor, mean, std, lamda, tonemap
         logger.info(f"Target shape: {clean.shape}")      # H, W, 3
         logger.info(f"Pred shape:  {pred.shape}")        # H, W, 3
 
-        if mean is not None and std is not None:
-            pred_unstd = unstandardize_tensor(pred, mean, std)
-
-        if lamda is not None:
-            pred_real = boxcox_inverse(pred_unstd, lmbda=lamda) 
-
-        # apply tonemap to model output
+        # invert tone map if needed
         if tonemap=='reinhard':
             pred_real = reinhard_inverse(pred)
         elif tonemap=='log':
             pred_real = torch.expm1(pred)
+        else: 
+            pred_real = pred
+
         psnr_val = compute_psnr(pred_real, clean)
     return pred_real, psnr_val
 
@@ -188,9 +185,10 @@ class LHDRLoss(nn.Module):
         self.epsilon = epsilon
 
     def forward(self, pred, target):
-        # pred: network output, linear luminance, shape (B, C, H, W)
-        # target: ground truth linear luminance, same shape
-
+        '''
+            pred: network output, linear luminance, shape (B, C, H, W)
+            target: ground truth linear luminance, same shape
+        '''
         # Detach denominator gradient as per paper (treat denominator as constant)
         denominator = pred.detach() + self.epsilon
 
@@ -246,7 +244,9 @@ def train_model(config):
     elif config['loss']=='rmse':
         criterion = RelativeMSELoss()       # when input tone mapping but output isn't
     elif config['loss']=='lhdr':
-        criterion = LHDRLoss()
+        criterion = LHDRLoss()              # when input tone mapping but output isn't
+    elif config['loss']=='l1':
+        criterion = nn.L1Loss()             # like MSE but abs value
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -282,7 +282,7 @@ def train_model(config):
             f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PSNR: {val_psnr:.2f} dB "
             f"| Time: {epoch_time:.2f}s")
 
-        # TODO: choose best mode based on loss and PSNR
+        # TODO: choose best mode based also on PSNR
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
@@ -335,8 +335,8 @@ def evaluate_model(config):
         scene = hist_sample["scene"]
 
         # Evaluate models
-        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, mean=None, std=None, lamda=None, tonemap=dataset_cfg['tonemap'])
-        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, mean=None, std=None, lamda=None, tonemap=dataset_cfg['tonemap'])
+        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, tonemap=dataset_cfg['tonemap'])
+        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, tonemap=dataset_cfg['tonemap'])
         init_psnr = compute_psnr(noisy, clean)
 
         logger.info(f"Scene: {scene}")

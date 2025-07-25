@@ -1,8 +1,8 @@
 # Evaluation Parameters
 model_path: checkpoints/20250724_hist2hist_dist_50ep.pth
 num_workers: 4
-num_samples: 10      # number of images to test during the evaluate step
-num_steps: 10       # number of iterations to perform during generative accumulation of radiance
+num_samples: 10       # number of images to test during the evaluate step
+num_steps: 10         # number of iterations to perform during generative accumulation of radiance
 
 model:
   in_channels: 3
