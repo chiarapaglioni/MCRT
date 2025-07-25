@@ -101,7 +101,7 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     plt.show()
 
 
-def hist_to_img(img_tensor, mean=None, std=None, lamda=None):
+def hist_to_img(img_tensor):
     """
     Convert a tensor to an image (mean feature), with optional unstandardization and inverse Box-Cox transform.
 
@@ -122,14 +122,6 @@ def hist_to_img(img_tensor, mean=None, std=None, lamda=None):
     else:
         raise ValueError(f"Unexpected tensor shape: {img_tensor.shape}")
 
-    if mean is not None and std is not None:
-        img = unstandardize_tensor(img, mean, std)
-
-    if lamda is not None:
-        img = boxcox_inverse(img, lmbda=lamda)               # Inverse boxcox
-    
-    # img = reinhard_inverse(img)
-    img = torch.expm1(img)
     img_np = img.permute(1, 2, 0).cpu().numpy()
     if img_np.shape[2] == 1:
         img_np = img_np[:, :, 0]
@@ -479,7 +471,7 @@ def boxcox_and_standardize(tensor, dim=None, global_mean=None, global_std=None):
     return normalized, mean, std
 
 
-def reinhard_tonemap(x, gamma=2.2):
+def reinhard_tonemap_gamma(x, gamma=2.2):
     """
     Applies gamma-compressed Reinhard global tone mapping to input.
     
@@ -501,31 +493,47 @@ def reinhard_tonemap(x, gamma=2.2):
         raise TypeError("Input must be a torch.Tensor or np.ndarray")
 
 
-def reinhard_inverse(x, gamma=2.2):
+def reinhard_tonemap(x):
     """
-    Inverts gamma-compressed Reinhard tone mapping.
-
+    Applies standard Reinhard global tone mapping: T(v) = v / (1 + v)
+    
     Supports both torch.Tensor and np.ndarray.
 
     Args:
-        x (torch.Tensor or np.ndarray): Tone-mapped image in [0, 1]
-        gamma (float): Gamma compression value
+        x (torch.Tensor or np.ndarray): HDR image, values >= 0
 
     Returns:
-        Same type as input: reconstructed HDR image
+        Same type as input: tone-mapped image in [0, 1) range
     """
     eps = 1e-8
-    max_val = 1.0 - 1e-6  # avoid 1.0 exactly
-
     if isinstance(x, torch.Tensor):
-        x = torch.clamp(x, min=0.0, max=max_val)
-        x_pow = torch.pow(x, gamma)
-        return x_pow / (1.0 - x_pow + eps)
-
+        x = torch.clamp(x, min=0)
+        return x / (1.0 + x + eps)
     elif isinstance(x, np.ndarray):
-        x = np.clip(x, 0.0, max_val)
-        x_pow = np.power(x, gamma)
-        return x_pow / (1.0 - x_pow + eps)
+        x = np.clip(x, a_min=0, a_max=None)
+        return x / (1.0 + x + eps)
+    else:
+        raise TypeError("Input must be a torch.Tensor or np.ndarray")
 
+
+def input_tonemap(x):
+    """
+    Applies SBMC input tone mapping: T_i(v) = (1/10) * ln(1 + v)
+    
+    Supports torch.Tensor and np.ndarray.
+
+    Args:
+        x (torch.Tensor or np.ndarray): HDR input image, values >= 0
+
+    Returns:
+        Same type as input: tone-mapped input
+    """
+    eps = 1e-8  # small epsilon to avoid log(0)
+    if isinstance(x, torch.Tensor):
+        x = torch.clamp(x, min=0)
+        return (1.0 / 10.0) * torch.log1p(x + eps)
+    elif isinstance(x, np.ndarray):
+        x = np.clip(x, a_min=0, a_max=None)
+        return (1.0 / 10.0) * np.log1p(x + eps)
     else:
         raise TypeError("Input must be a torch.Tensor or np.ndarray")

@@ -1,6 +1,6 @@
 dataset:
   root_dir: output                      # Raw dataset location
-  cached_dir: ../histograms                # Cached histograms are saved
+  cached_dir: histograms                # Cached histograms are saved
   crop_size: 128
   low_spp: 32
   high_spp: 4500
@@ -10,8 +10,8 @@ dataset:
   virt_size: 100
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
-  hist_regeneration: false
-  target_sample: 2
+  hist_regeneration: true
+  target_sample: 30
 
 model:
   in_channels: 3
@@ -27,8 +27,8 @@ num_workers: 4
 shuffle: true
 pin_memory: false
 
-val_split: 0.15  # 10% validation split
+val_split: 0.2  # 10% validation split
 
 # training
-num_epochs: 20
+num_epochs: 50
 save_dir: checkpoints

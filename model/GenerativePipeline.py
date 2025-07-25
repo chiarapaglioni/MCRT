@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 # Utils
 import os
+import math
 import time
 from pathlib import Path
 from datetime import datetime
@@ -20,9 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 # DATA LOADERS
-def get_generative_dataloaders(config):
+def get_generative_dataloaders(config, device):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
+    dataset_cfg['device'] = device  
 
     dataset = HistogramDataset(**dataset_cfg)
 
@@ -152,6 +154,30 @@ def validate_residual_epoch(model, loss_fn, dataloader, device, n_bins):
     return avg_loss, avg_psnr
 
 
+def count_bin0_only_histograms(input_hist, title):
+    # input_hist: shape (B, C, bins, H, W)
+
+    bins = input_hist.shape[2]
+    device = input_hist.device
+
+    # One-hot vector [1, 0, ..., 0]
+    target = torch.zeros((bins,), device=device)
+    target[0] = 1.0
+
+    # Reshape histograms to (N, bins)
+    input_flat = input_hist.permute(0, 1, 3, 4, 2).reshape(-1, bins)
+
+    # Boolean mask where each histogram exactly matches target
+    matches = (input_flat == target).all(dim=1)
+
+    # Count and total
+    count = matches.sum().item()
+    total = input_flat.shape[0]
+
+    percentage = (count / total) * 100
+    logger.info(f"{title} hist: {count}/{total} histograms are bin-0-only ({percentage:.2f}%)")
+
+
 # TRAIN STEP - DISTRIBUTION
 def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins, epoch):
     model.train()
@@ -162,6 +188,9 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
         input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
         target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
         bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+        
+        count_bin0_only_histograms(input_hist, title="Input")
+        count_bin0_only_histograms(target_hist, title="Target")
 
         optimizer.zero_grad()
         pred_logits = model(input_hist)                                 # (B, C, n_bins, H, W)
@@ -181,7 +210,7 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
 
         running_loss += loss.item()
 
-        if epoch>=100:
+        if epoch>=10000:
             plot_input_vs_prediction(
                 input_hist=input_hist,
                 residual=pred_logits.permute(0, 1, 4, 2, 3).detach().cpu(),  # (B, C, bins, H, W)
@@ -277,6 +306,39 @@ class CustomCrossEntropyLoss(nn.Module):
             return ce_loss.sum()
         else:
             return ce_loss
+        
+# CROSS ENTROPY LOSS FUNCTION
+class EntropyWeightedCrossEntropyLoss(nn.Module):
+    def __init__(self, reduction='mean', entropy_epsilon=1e-6):
+        super().__init__()
+        self.reduction = reduction
+        self.entropy_epsilon = entropy_epsilon
+
+    def forward(self, pred_logits, target_probs):
+        """
+        Args:
+            pred_logits: (N, n_bins)
+            target_probs: (N, n_bins)
+        """
+        log_probs = F.log_softmax(pred_logits, dim=1)
+        ce_loss = -(target_probs * log_probs).sum(dim=1)  # (N,)
+
+        # Compute entropy of the target histogram
+        entropy = -(target_probs * torch.log(target_probs + self.entropy_epsilon)).sum(dim=1)  # (N,)
+
+        # Normalize entropy to [0, 1] by dividing by max possible entropy
+        max_entropy = math.log(target_probs.size(1))
+        entropy_norm = entropy / max_entropy
+
+        # Use entropy as a weight: higher entropy → higher weight
+        weighted_loss = ce_loss * entropy_norm.detach()
+
+        if self.reduction == 'mean':
+            return weighted_loss.mean()
+        elif self.reduction == 'sum':
+            return weighted_loss.sum()
+        else:
+            return weighted_loss
 
 
 # TRAINING LOOP - DISTRIBUTION
@@ -284,7 +346,7 @@ def train_histogram_generator(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Training on {device}")
 
-    train_loader, val_loader = get_generative_dataloaders(config)
+    train_loader, val_loader = get_generative_dataloaders(config, device)
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
     n_bins = dataset_cfg["hist_bins"]
@@ -301,6 +363,7 @@ def train_histogram_generator(config):
 
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
     loss_fn = CustomCrossEntropyLoss()
+    # loss_fn = EntropyWeightedCrossEntropyLoss()         # not working well because majority of data is skewed left !
 
     best_val_loss = float("inf")
     train_losses, val_losses = [], []
@@ -339,7 +402,7 @@ def train_histogram_residual(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Training on {device}")
 
-    train_loader, val_loader = get_generative_dataloaders(config)
+    train_loader, val_loader = get_generative_dataloaders(config, device)
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
     n_bins = dataset_cfg["hist_bins"]
@@ -428,7 +491,7 @@ def run_generative_accumulation_pipeline(config):
         input_hist = batch["input_hist"].to(device)  # normalized histogram
 
         # Restore raw count scale
-        total_init_counts = 32  # or whatever your dataset normalization used
+        total_init_counts = dataset_cfg['low_spp'] - dataset_cfg['target_sample']
         current_hist = input_hist * total_init_counts
 
         # Track photon count for normalization
@@ -484,10 +547,11 @@ def run_generative_accumulation_pipeline(config):
         plt.tight_layout()
         save_path = output_dir / f"sample_{idx}_progressive_generation.png"
         plt.savefig(save_path)
-        plt.show()
+        plt.show(block=True)
         print(f"Saved progressive generation plot to {save_path}")
 
 
+# ADDS RESIDUAL ITERATIVELLY TO RECOVER CLEAN IMAGE
 def iterative_evaluate(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Generating on {device}")
@@ -660,7 +724,7 @@ def test_histogram_generator(config):
     logger.info(f"Loaded model from {model_path}")
 
     # Load validation set
-    _, val_loader = get_generative_dataloaders(config)
+    _, val_loader = get_generative_dataloaders(config, device)
 
     # Run visualization
     num_samples = config.get("num_samples", 4)

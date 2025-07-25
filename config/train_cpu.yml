@@ -5,13 +5,13 @@ dataset:
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
-  mode: hist                            # Options: 'hist' for hist2noise or 'img' for noise2noise
+  mode: img                             # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
   virt_size: 300
   clean: true                           # Whether to include 'clean' targets if available
-  debug: false
+  debug: true
   hist_regeneration: false
-  supervised: false                     # if true supervised else self supervised
+  supervised: true                      # if true supervised else self supervised
   tonemap: none                         # 'log' or 'reinhard' or 'none'
 
 model:

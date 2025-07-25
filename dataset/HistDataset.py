@@ -17,7 +17,7 @@ class HistogramDataset(Dataset):
                  data_augmentation: bool = True, virt_size: int = 1000,
                  hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
                  high_spp: int = 4500, cached_dir: str = None,
-                 debug: bool = False, device: str = None, mode: str = None,
+                 debug: bool = False, mode: str = None, device: str = None,
                  hist_regeneration: bool = False, scene_names=None, 
                  target_sample: int = 1):
         
@@ -31,7 +31,8 @@ class HistogramDataset(Dataset):
         self.high_spp = high_spp
         self.cached_dir = cached_dir
         self.debug = debug
-        self.device = device or torch.device("cpu")
+        self.device = device
+        logger.info(f"Using device Data Loader: {self.device}")
         self.hist_regeneration = hist_regeneration
         self.target_sample = target_sample
 
@@ -87,58 +88,34 @@ class HistogramDataset(Dataset):
             self.scene_paths[key] = folder
 
             # HISTOGRAM CACHING PATHS
-            input_hist_cache = None
-            target_hist_cache = None
+            hist_cache = None
             if self.cached_dir:
-                input_hist_cache = os.path.join(self.cached_dir, f"{key}_input_hist_{self.hist_bins}bins.npz")
-                target_hist_cache = os.path.join(self.cached_dir, f"{key}_target_hist_{self.hist_bins}bins.npz")
+                hist_cache = os.path.join(self.cached_dir, f"{key}_gen_hist_{self.hist_bins}bins.npz")
 
             # Split spp1 samples into input and target sets
             assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 
-            input_samples = spp1_samples[:spp1_samples.shape[0] - self.target_sample]
-            target_samples = spp1_samples[spp1_samples.shape[0] - self.target_sample:]
-
             # INPUT HISTOGRAM
-            if input_hist_cache and os.path.exists(input_hist_cache) and not self.hist_regeneration:
-                cached = np.load(input_hist_cache)
-                input_hist = cached['features']
+            if hist_cache and os.path.exists(hist_cache) and not self.hist_regeneration:
+                cached = np.load(hist_cache)
+                hist = cached['features']
                 bin_edges = cached['bin_edges']
             else:
-                logger.info(f"Computing input histogram for scene {key}")
-                input_hist, bin_edges = generate_histograms(input_samples, self.hist_bins, self.device)
+                logger.info(f"Computing histogram for scene {key}")
+                hist, bin_edges = generate_histograms(spp1_samples, self.hist_bins, self.device)
                 # input_hist, bin_edges = generate_histograms_with_zero_bin(input_samples, self.hist_bins, self.device)
-                logger.info(f"Generated input histogram of shape {input_hist.shape}")
-                input_hist = input_hist.astype(np.float32)
+                logger.info(f"Generated histogram of shape {hist.shape}")
+                hist = hist.astype(np.float32)
                 bin_edges = bin_edges.astype(np.float32)
-                if input_hist_cache:
-                    np.savez_compressed(input_hist_cache, features=input_hist, bin_edges=bin_edges)
+                if hist_cache:
+                    np.savez_compressed(hist_cache, features=hist, bin_edges=bin_edges)
 
-            self.hist_features[key] = input_hist
-            self.bin_edges[key] = bin_edges
+            self.hist_features[key] = torch.from_numpy(hist).float()
+            self.bin_edges[key] = torch.from_numpy(bin_edges).float()
 
-            # TARGET HISTOGRAM 
-            # (from target_samples or clean image if target_sample == 0)
-            if self.target_sample == 0:
-                logger.info(f"Using clean image as target for scene {key}")
-                samples = clean_img[None, ...]
-            else:
-                samples = target_samples
-
-            if target_hist_cache and os.path.exists(target_hist_cache) and not self.hist_regeneration:
-                cached = np.load(target_hist_cache)
-                target_hist = cached['features']
-            else:
-                logger.info(f"Computing target histogram for scene {key}")
-                target_hist, _ = generate_histograms(samples, self.hist_bins, self.device)
-                # target_hist, _ = generate_histograms_with_zero_bin(samples, self.hist_bins, self.device)
-                logger.info(f"Generated target histogram of shape {target_hist.shape}")
-                target_hist = target_hist.astype(np.float32)
-                bin_edges = bin_edges.astype(np.float32)
-                if target_hist_cache:
-                    np.savez_compressed(target_hist_cache, features=target_hist, bin_edges=bin_edges)
-
-            self.target_histograms[key] = target_hist
+            # Proportion of samples to allocate to target
+            p = self.target_sample / (self.low_spp + 1e-8)
+            self.p = torch.tensor(min(p, 1.0))  # Ensure in [0, 1]
 
 
     def __len__(self):
@@ -146,22 +123,23 @@ class HistogramDataset(Dataset):
 
     def __getitem__(self, idx, crop_coords=None):
         scene = self.scene_names[idx % len(self.scene_names)]
-
-        input_hist = self.hist_features[scene]
-        target_hist = self.target_histograms[scene]
+        hist = self.hist_features[scene]
         clean_tensor = self.clean_images[scene]
-        bin_edges = self.bin_edges[scene]
-        bin_edges_tensor = torch.from_numpy(bin_edges).float()
+        bin_edges_tensor = self.bin_edges[scene]
+
+        # Create binomial distribution with per-bin counts
+        binom = torch.distributions.Binomial(total_count=hist, probs=self.p)
+
+        # Sample the number of target samples per bin + compute input hist based on that
+        target_hist = binom.sample()
+        input_hist = hist - target_hist
 
         # NORMALISATION
-        input_hist_sum = np.sum(input_hist, axis=-1, keepdims=True) + 1e-8
-        input_hist = input_hist / input_hist_sum            # shape (H, W, 3, B)
+        target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)          # shape (H, W, 3, B)
+        input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)             # shape (H, W, 3, B)
 
-        target_hist_sum = np.sum(target_hist, axis=-1, keepdims=True) + 1e-8
-        target_hist = target_hist / target_hist_sum         # shape (H, W, 3, B)
-
-        input_tensor = torch.from_numpy(np.transpose(input_hist, (2, 3, 0, 1))).float()
-        target_tensor = torch.from_numpy(np.transpose(target_hist, (2, 3, 0, 1))).float()
+        input_tensor = input_hist.permute(2, 3, 0, 1).contiguous().float()                  # shape (3, B, H, W)
+        target_tensor = target_hist.permute(2, 3, 0, 1).contiguous().float()                # shape (3, B, H, W)
 
         if self.crop_size:
             if crop_coords is None:

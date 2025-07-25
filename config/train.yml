@@ -7,10 +7,10 @@ dataset:
   hist_bins: 16
   mode: img                            # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
-  virt_size: 2000
+  virt_size: 1000
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
-  hist_regeneration: true
+  hist_regeneration: false
   supervised: false
   tonemap: none                          # 'log' or 'reinhard'
 
@@ -18,7 +18,7 @@ model:
   in_channels: 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 5
+  depth: 4
   start_filters: 48
   learning_rate: 1e-4
 
@@ -27,11 +27,11 @@ batch_size: 32
 num_workers: 10
 shuffle: true
 pin_memory: false
-loss: lhdr                              # 'rmse' or 'lhdr' when output is not tonemapped
+loss: mse                               # 'rmse' or 'lhdr' when output is not tonemapped
 standardisation: global                 # TODO: add support to toggle on/off log norm
 
 val_split: 0.2  # 10% validation split
 
 # training
-num_epochs: 50
+num_epochs: 80
 save_dir: checkpoints

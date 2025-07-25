@@ -6,7 +6,7 @@ from utils.utils import setup_logger
 from renderer.RenderingPipeline import generate_data
 from dataset.HistogramLoader import test_data_loader
 from model.DenoisingPipeline import train_model, evaluate_model
-from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline, test_histogram_generator
+from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline, test_histogram_generator, train_histogram_residual
 
 logger = setup_logger()
 
@@ -46,13 +46,14 @@ def main():
 
     # GEN-TRAIN (OK) <3
     elif task == "train_gen":
-        train_histogram_generator(config)
+        # train_histogram_generator(config)                       # Train x dist
+        train_histogram_residual(config)                        # Train x residual
     
     # GEN-EVAL (OK) <3
     elif task == "eval_gen":
-        # iterative_evaluate(config)
-        # run_generative_accumulation_pipeline(config)
-        test_histogram_generator(config)
+        iterative_evaluate(config)
+        # run_generative_accumulation_pipeline(config)          # GAP
+        # test_histogram_generator(config)                      # noisy vs. pred
 
 if __name__ == "__main__":
     main()

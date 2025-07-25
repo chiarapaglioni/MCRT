@@ -13,7 +13,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, unstandardize_tensor, compute_global_mean_std, boxcox_inverse, reinhard_inverse
+from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, reinhard_tonemap, reinhard_tonemap_gamma
 
 # Logger
 import logging
@@ -98,16 +98,8 @@ def evaluate_sample(model, input_tensor, clean_tensor, tonemap):
         logger.info(f"Target shape: {clean.shape}")      # H, W, 3
         logger.info(f"Pred shape:  {pred.shape}")        # H, W, 3
 
-        # invert tone map if needed
-        if tonemap=='reinhard':
-            pred_real = reinhard_inverse(pred)
-        elif tonemap=='log':
-            pred_real = torch.expm1(pred)
-        else: 
-            pred_real = pred
-
-        psnr_val = compute_psnr(pred_real, clean)
-    return pred_real, psnr_val
+        psnr_val = compute_psnr(pred, clean)
+    return pred, psnr_val
 
 
 # TRAINING STEP
@@ -116,20 +108,16 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
-        hist = batch['input'].to(device)        # B, 3, H, W        (in log space)
-        target = batch['target'].to(device)     # 3, H, W           (in original space)
+        hist = batch['input'].to(device)        # B, 3, H, W
+        target = batch['target'].to(device)     # B, 3, H, W
 
         optimizer.zero_grad()
-        pred = model(hist)                      # 3, H, W
+        pred = model(hist)                      # B, 3, H, W
 
         # TODO: try inverting the prediction from log to original space right before feeding it to the loss!!
         # - log applied to both input and target
         # - invert target to original right before the loss
         # NOT WORKING :)))))))
-        if tonemap=='reinhard':
-            pred = reinhard_inverse(pred)
-        elif tonemap=='log':
-            pred = torch.expm1(pred)
 
         loss = criterion(pred, target)
         loss.backward()
@@ -158,17 +146,12 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             clean = batch['clean'].to(device)           # B, 3, H, W
 
             pred = model(hist)                          # B, 3, H, W
+
             loss = criterion(pred, target)
             total_loss += loss.item()
 
-            for i in range(pred.shape[0]):                
-                # Unstandardize prediction
-                if tonemap=='reinhard':
-                    pred_i = reinhard_inverse(pred[i])
-                elif tonemap=='log':
-                    pred_i = torch.expm1(pred[i])
-                else:
-                    pred_i = pred[i]
+            for i in range(pred.shape[0]):
+                pred_i = pred[i]
                 clean_i = clean[i]
 
                 total_psnr += compute_psnr(pred_i, clean_i)
@@ -252,8 +235,10 @@ def train_model(config):
     date_str = datetime.now().strftime("%Y-%m-%d")
     model_type = "hist2noise" if dataset_cfg["mode"] == "hist" else "noise2noise"
     out_mode = model_cfg["out_mode"]
+    total_epochs = config["num_epochs"]
+    loss_func = config['loss']
     bins = dataset_cfg["hist_bins"] if dataset_cfg["mode"] == "hist" else "img"
-    filename = f"{date_str}_{model_type}_{out_mode}_bins{bins}.pth"
+    filename = f"{date_str}_{model_type}_{out_mode}_bins{bins}_ep{total_epochs}_{loss_func}.pth"
 
     save_dir = config.get("save_dir", "checkpoints")
     os.makedirs(save_dir, exist_ok=True)
@@ -305,7 +290,7 @@ def evaluate_model(config):
 
     # Load datasets
     hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
-    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, hist_regeneration=False)
+    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
 
     # Randomly select n indices
     total_samples = len(img_dataset)
@@ -313,7 +298,8 @@ def evaluate_model(config):
     logger.info(f"Randomly selected indices: {selected_indices}")
 
     # Load models
-    hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    # hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="img", device=device)
     img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
 
     for idx in selected_indices:
@@ -335,7 +321,8 @@ def evaluate_model(config):
         scene = hist_sample["scene"]
 
         # Evaluate models
-        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, tonemap=dataset_cfg['tonemap'])
+        # hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, tonemap=dataset_cfg['tonemap'])
+        hist_pred, hist_psnr = evaluate_sample(hist_model, img_input, clean, tonemap=dataset_cfg['tonemap'])
         img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, tonemap=dataset_cfg['tonemap'])
         init_psnr = compute_psnr(noisy, clean)
 
@@ -347,8 +334,8 @@ def evaluate_model(config):
         # Save plots
         plot_images(
             noisy, init_psnr, 
-            img_pred, img_psnr,
             hist_pred, hist_psnr, 
+            img_pred, img_psnr,
             target, clean,
             save_path=f'plots/denoised_{idx}.png'
         )

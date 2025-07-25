@@ -6,7 +6,7 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
-from utils.utils import reinhard_tonemap
+from utils.utils import reinhard_tonemap, input_tonemap, reinhard_tonemap_gamma
 
 import logging
 logger = logging.getLogger(__name__)
@@ -176,34 +176,35 @@ class HistogramBinomDataset(Dataset):
         
         else:
             input_avg = input_samples.mean(axis=0)  # (3, H, W)
+
             if self.tonemap == 'log':
                 input_avg = np.log1p(input_avg)
                 input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
             elif self.tonemap == 'reinhard':
                 input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
-                input_tensor = reinhard_tonemap(input_tensor)
-            else: # alway apply reinhard as default!
+                # input_tensor = reinhard_tonemap(input_tensor)
+                input_tensor = reinhard_tonemap_gamma(input_tensor)
+            else: 
                 input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
-                input_tensor = reinhard_tonemap(input_tensor)
         
         if self.supervised:
             if self.tonemap == 'log':
                 target_tensor = torch.log1p(clean_tensor)                   # shape: (3, H, W)
             elif self.tonemap == 'reinhard':
                 target_tensor = reinhard_tonemap(clean_tensor)
-            else: 
-                # do not apply log transformation to target sample
-                target_tensor = torch.from_numpy(clean_tensor).float()      
+                # target_tensor = reinhard_tonemap_gamma(target_tensor)
+            else:
+                target_tensor = clean_tensor   
         else: 
             if self.tonemap == 'log':
                 target_sample = np.log1p(target_sample)                     # shape: (3, H, W)
-                target_tensor = torch.from_numpy(target_sample).float()     # shape: (3, H, W)
+                target_tensor = torch.from_numpy(target_sample).float()
             elif self.tonemap == 'reinhard':
                 target_sample = torch.from_numpy(target_sample).float()     # shape: (3, H, W)
-                target_tensor = reinhard_tonemap(target_sample)
+                # target_tensor = reinhard_tonemap(target_sample)
+                target_tensor = reinhard_tonemap_gamma(target_tensor)
             else: 
-                # do not apply log transformation to target sample
-                target_tensor = torch.from_numpy(target_sample).float()                               # shape: (3, H, W)
+                target_tensor = torch.from_numpy(target_sample).float()     # shape: (3, H, W) 
 
         # CROP
         if self.crop_size:
@@ -226,12 +227,15 @@ class HistogramBinomDataset(Dataset):
                 noisy_tensor = torch.flip(noisy_tensor, dims=[-1])
                 if clean_tensor is not None:
                     clean_tensor = torch.flip(clean_tensor, dims=[-1])
-            if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[-2])    # vertical flip
-                target_tensor = torch.flip(target_tensor, dims=[-2])
-                noisy_tensor = torch.flip(noisy_tensor, dims=[-2])
-                if clean_tensor is not None:
-                    clean_tensor = torch.flip(clean_tensor, dims=[-2])
+
+            # Remove or comment this part out to avoid upside-down flips
+            # if random.random() > 0.5:
+            #     input_tensor = torch.flip(input_tensor, dims=[-2])    # vertical flip
+            #     target_tensor = torch.flip(target_tensor, dims=[-2])
+            #     noisy_tensor = torch.flip(noisy_tensor, dims=[-2])
+            #     if clean_tensor is not None:
+            #         clean_tensor = torch.flip(clean_tensor, dims=[-2])
+
 
         return {
             "input": input_tensor,          # (3, crop_size, crop_size) or (3, H, W)
