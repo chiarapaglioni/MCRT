@@ -18,7 +18,7 @@ class HistogramBinomDataset(Dataset):
                  clean: bool = False, cached_dir: str = None, debug: bool = False, 
                  device: str = None, hist_regeneration: bool = False, scene_names=None, 
                  supervised: bool = False, global_mean = None, global_std = None, 
-                 tonemap: str = None):
+                 tonemap: str = None, target_split: int = 1):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -33,6 +33,7 @@ class HistogramBinomDataset(Dataset):
         self.device = device or torch.device("cpu")
         self.hist_regeneration = hist_regeneration
         self.tonemap = tonemap
+        self.target_split = target_split
 
         # mean/std for normalisation
         # try normalising by only diviing by the mean per image
@@ -106,8 +107,8 @@ class HistogramBinomDataset(Dataset):
             # Randomly shuffle indices to pick input and target samples from spp1_img
             indices = list(range(self.low_spp))
             random.shuffle(indices)
-            input_idx = indices[:-1]
-            target_idx = indices[-1]
+            input_idx = indices[:self.target_split]
+            target_idx = indices[-self.target_split:]
             self.scene_sample_indices[key] = (input_idx, target_idx)
 
             # Histogram caching (hist mode only)
@@ -150,61 +151,35 @@ class HistogramBinomDataset(Dataset):
         clean_tensor = self.clean_images.get(scene, None)   # (3, H, W)
 
         input_idx, target_idx = self.scene_sample_indices[scene]
-        input_samples = spp1_img[input_idx]           # (N-1, 3, H, W)
-        target_sample = spp1_img[target_idx]          # (3, H, W)
+        input_samples = spp1_img[input_idx]           # (low_spp-N, 3, H, W)
+        target_sample = spp1_img[target_idx]          # (N, 3, H, W)
         
         if self.mode == "hist":
-            hist_norm = self.hist_features[scene]               # (H, W, 3, bins)
+            hist_norm = self.hist_features[scene]                           # (H, W, 3, bins)
 
             input_samples_tensor = torch.from_numpy(input_samples).float()  # (N-1, 3, H, W)
-            mean = input_samples_tensor.mean(dim=0)         # (3, H, W)
-            std = input_samples_tensor.std(dim=0)           # (3, H, W)
-
-            # TONEMAP
-            if self.tonemap == 'log':
-                mean_t = torch.log1p(mean).unsqueeze(1)  # (3, 1, H, W)
-                std_t = torch.log1p(std).unsqueeze(1)    # (3, 1, H, W)
-            elif self.tonemap == 'reinhard':
-                mean_t = reinhard_tonemap(mean).unsqueeze(1)
-                std_t = reinhard_tonemap(std).unsqueeze(1)
+            mean = input_samples_tensor.mean(dim=0)                         # (3, H, W)
+            std = input_samples_tensor.std(dim=0)                           # (3, H, W)
 
             # Histogram from numpy → torch, (H, W, 3, bins) → (3, bins, H, W)
             hist_torch = torch.from_numpy(hist_norm).permute(2, 3, 0, 1).float()
             # input_tensor = torch.cat([hist_torch, mean_t, std_t], dim=1)  # (3, bins+2, H, W)
             # TODO: only train network to map normalised hist to noisy image
             input_tensor = hist_torch
-        
         else:
-            input_avg = input_samples.mean(axis=0)  # (3, H, W)
+            input_avg = input_samples.mean(axis=0)                      # (3, H, W)
+            input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
+            # input_tensor = input_tonemap(input_tensor)
+            # input_tensor = reinhard_tonemap_gamma(input_tensor)
 
-            if self.tonemap == 'log':
-                input_avg = np.log1p(input_avg)
-                input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
-            elif self.tonemap == 'reinhard':
-                input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
-                # input_tensor = reinhard_tonemap(input_tensor)
-                input_tensor = reinhard_tonemap_gamma(input_tensor)
-            else: 
-                input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
         
+        # TARGET
         if self.supervised:
-            if self.tonemap == 'log':
-                target_tensor = torch.log1p(clean_tensor)                   # shape: (3, H, W)
-            elif self.tonemap == 'reinhard':
-                target_tensor = reinhard_tonemap(clean_tensor)
-                # target_tensor = reinhard_tonemap_gamma(target_tensor)
-            else:
-                target_tensor = clean_tensor   
+            target_tensor = clean_tensor   
         else: 
-            if self.tonemap == 'log':
-                target_sample = np.log1p(target_sample)                     # shape: (3, H, W)
-                target_tensor = torch.from_numpy(target_sample).float()
-            elif self.tonemap == 'reinhard':
-                target_sample = torch.from_numpy(target_sample).float()     # shape: (3, H, W)
-                # target_tensor = reinhard_tonemap(target_sample)
-                target_tensor = reinhard_tonemap_gamma(target_tensor)
-            else: 
-                target_tensor = torch.from_numpy(target_sample).float()     # shape: (3, H, W) 
+            target_avg = target_sample.mean(axis=0)                     # (3, H, W)
+            target_tensor = torch.from_numpy(target_avg).float()        # (3, H, W)
+
 
         # CROP
         if self.crop_size:
@@ -212,12 +187,12 @@ class HistogramBinomDataset(Dataset):
                 i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
             else:
                 i, j, h, w = crop_coords
-
             input_tensor = input_tensor[..., i:i+h, j:j+w]    # crop spatial dims
             target_tensor = target_tensor[..., i:i+h, j:j+w]
             noisy_tensor = noisy_tensor[..., i:i+h, j:j+w]
             if clean_tensor is not None:
                 clean_tensor = clean_tensor[..., i:i+h, j:j+w]
+
 
         # DATA AUGMENTATION: random horizontal/vertical flips
         if self.data_augmentation:
@@ -227,21 +202,20 @@ class HistogramBinomDataset(Dataset):
                 noisy_tensor = torch.flip(noisy_tensor, dims=[-1])
                 if clean_tensor is not None:
                     clean_tensor = torch.flip(clean_tensor, dims=[-1])
-
             # Remove or comment this part out to avoid upside-down flips
-            # if random.random() > 0.5:
-            #     input_tensor = torch.flip(input_tensor, dims=[-2])    # vertical flip
-            #     target_tensor = torch.flip(target_tensor, dims=[-2])
-            #     noisy_tensor = torch.flip(noisy_tensor, dims=[-2])
-            #     if clean_tensor is not None:
-            #         clean_tensor = torch.flip(clean_tensor, dims=[-2])
+            if random.random() > 0.5:
+                input_tensor = torch.flip(input_tensor, dims=[-2])    # vertical flip
+                target_tensor = torch.flip(target_tensor, dims=[-2])
+                noisy_tensor = torch.flip(noisy_tensor, dims=[-2])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[-2])
 
 
         return {
-            "input": input_tensor,          # (3, crop_size, crop_size) or (3, H, W)
-            "target": target_tensor,        # (3, crop_size, crop_size) or (3, H, W)
-            "noisy": noisy_tensor,          # (3, crop_size, crop_size) or (3, H, W)
-            "clean": clean_tensor if clean_tensor is not None else None,  # (3, crop_size, crop_size) or None
+            "input": input_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
+            "target": target_tensor,                                        # (3, crop_size, crop_size) or (3, H, W)
+            "noisy": noisy_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
+            "clean": clean_tensor if clean_tensor is not None else None,    # (3, crop_size, crop_size) or None
             "scene": scene,
             "crop_coords": (i, j, h, w) if self.crop_size else None,              
         }

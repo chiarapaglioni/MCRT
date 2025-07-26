@@ -13,7 +13,7 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, reinhard_tonemap, reinhard_tonemap_gamma
+from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
 # Logger
 import logging
@@ -88,9 +88,10 @@ def get_sample(dataset, idx=0, device='cpu'):
     return input_tensor, target, noisy, clean
 
 
-def evaluate_sample(model, input_tensor, clean_tensor, tonemap):
+def evaluate_sample(model, input_tensor, clean_tensor):
     with torch.no_grad():
-        pred = model(input_tensor).squeeze(0)
+        tonemapped_input = apply_tonemap(input_tensor, "reinhard_gamma")
+        pred = model(tonemapped_input)
         clean = clean_tensor
 
         assert pred.dim() == 3 and clean.dim() == 3
@@ -98,7 +99,7 @@ def evaluate_sample(model, input_tensor, clean_tensor, tonemap):
         logger.info(f"Target shape: {clean.shape}")      # H, W, 3
         logger.info(f"Pred shape:  {pred.shape}")        # H, W, 3
 
-        psnr_val = compute_psnr(pred, clean)
+        psnr_val = compute_psnr(pred.squeeze(0), clean)
     return pred, psnr_val
 
 
@@ -108,24 +109,21 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
-        hist = batch['input'].to(device)        # B, 3, H, W
-        target = batch['target'].to(device)     # B, 3, H, W
+        hdr_input = batch['input'].to(device)               # B, 3, H, W
+        hdr_target = batch['target'].to(device)             # B, 3, H, W
 
         optimizer.zero_grad()
-        pred = model(hist)                      # B, 3, H, W
+        tonemapped_input = apply_tonemap(hdr_input, "reinhard_gamma") 
+        pred = model(tonemapped_input)                      # B, 3, H, W (linear space)
 
-        # TODO: try inverting the prediction from log to original space right before feeding it to the loss!!
-        # - log applied to both input and target
-        # - invert target to original right before the loss
-        # NOT WORKING :)))))))
-
-        loss = criterion(pred, target)
+        # compute loss in tonemapped space
+        loss = criterion(pred, hdr_target)
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
 
-        # Plot the first batch in the first epoch for debugging
+        # DEBUG (plot the first batch)
         if debug and epoch==5:
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
 
@@ -141,20 +139,24 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
 
     with torch.no_grad():
         for batch in dataloader:
-            hist = batch['input'].to(device)            # B, 3, H, W
-            target = batch['target'].to(device)         # B, 3, H, W
-            clean = batch['clean'].to(device)           # B, 3, H, W
+            hdr_input = batch['input'].to(device)           # B, 3, H, W
+            hdr_target = batch['target'].to(device)         # B, 3, H, W
+            clean = batch['clean'].to(device)               # B, 3, H, W
 
-            pred = model(hist)                          # B, 3, H, W
+            tonemapped_input = apply_tonemap(hdr_input, "reinhard_gamma") 
+            pred = model(tonemapped_input)                  # B, 3, H, W (linear space)
 
-            loss = criterion(pred, target)
+            loss = criterion(pred, hdr_target)
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
                 pred_i = pred[i]
                 clean_i = clean[i]
 
-                total_psnr += compute_psnr(pred_i, clean_i)
+                pred_tonemapped = apply_tonemap(pred_i, "reinhard_gamma")
+                clean_tonemapped = apply_tonemap(clean_i, "reinhard_gamma")
+
+                total_psnr += compute_psnr(pred_tonemapped, clean_tonemapped)
                 count += 1
 
     avg_loss = total_loss / len(dataloader)
@@ -172,12 +174,9 @@ class LHDRLoss(nn.Module):
             pred: network output, linear luminance, shape (B, C, H, W)
             target: ground truth linear luminance, same shape
         '''
-        # Detach denominator gradient as per paper (treat denominator as constant)
-        denominator = pred.detach() + self.epsilon
-
-        # Compute squared error normalized by squared denominator
+        # Detach denominator gradient and Compute squared error normalized by squared denominator
+        denominator = (pred.detach() + self.epsilon)
         loss = ((pred - target) ** 2) / (denominator ** 2)
-
         return loss.mean()
 
 
@@ -285,10 +284,8 @@ def evaluate_model(config):
     # Number of random samples to evaluate
     n_samples = config["eval"].get("n_eval_samples", 5)
 
-    # Dataset config
     dataset_cfg = config["dataset"]
 
-    # Load datasets
     hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
     img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
 
@@ -322,8 +319,8 @@ def evaluate_model(config):
 
         # Evaluate models
         # hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, tonemap=dataset_cfg['tonemap'])
-        hist_pred, hist_psnr = evaluate_sample(hist_model, img_input, clean, tonemap=dataset_cfg['tonemap'])
-        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean, tonemap=dataset_cfg['tonemap'])
+        hist_pred, hist_psnr = evaluate_sample(hist_model, img_input, clean)
+        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
         init_psnr = compute_psnr(noisy, clean)
 
         logger.info(f"Scene: {scene}")

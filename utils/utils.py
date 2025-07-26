@@ -384,7 +384,6 @@ def standardize_tensor(tensor, eps=1e-8):
 
     # Standardize
     standardized = (tensor - mean) / std
-
     return standardized, mean, std
 
 
@@ -413,7 +412,7 @@ def boxcox_transform(x, lmbda=0.2, epsilon=1e-6):
     Applies the Box-Cox transformation to stabilize variance and make the data more Gaussian-like.
 
     Args:
-        x (Tensor): Input tensor (should be non-negative or strictly positive).
+        x (torch.Tensor): Input tensor (should be non-negative or strictly positive).
         lmbda (float): The Box-Cox lambda parameter controlling the shape of the transformation.
                        - lmbda = 0: log transform
                        - lmbda != 0: power transform
@@ -433,49 +432,9 @@ def boxcox_transform(x, lmbda=0.2, epsilon=1e-6):
         return (x ** lmbda - 1) / lmbda
 
 
-def boxcox_inverse(y, lmbda, epsilon=1e-6):
-    """
-    Inverts the Box-Cox transformation to recover the original input data.
-
-    Args:
-        y (Tensor): Transformed tensor from boxcox_transform().
-        lmbda (float): The same lambda used during the forward Box-Cox transformation.
-        epsilon (float): Small constant used in the forward transform (to be subtracted here).
-
-    Returns:
-        Tensor: Recovered original tensor.
-    """
-    if lmbda == 0:
-        # Invert the log transform: x = exp(y)
-        x = torch.exp(y)
-    else:
-        # Invert the power transform: x = (λy + 1)^(1/λ)
-        x = (lmbda * y + 1) ** (1 / lmbda)
-
-    # Subtract epsilon to restore original scale (reversing the epsilon added in the transform)
-    return x - epsilon
-
-
-def boxcox_and_standardize(tensor, dim=None, global_mean=None, global_std=None):
-    """Applies Box-Cox and then standardizes. Falls back to global mean/std if provided."""
-    transformed = boxcox_transform(tensor)
-
-    if global_mean is not None and global_std is not None:
-        mean = global_mean
-        std = global_std + 1e-8
-    else:
-        mean = transformed.mean() if dim is None else transformed.mean(dim=dim)
-        std = transformed.std() if dim is None else transformed.std(dim=dim) + 1e-8
-
-    normalized = (transformed - mean) / std
-    return normalized, mean, std
-
-
 def reinhard_tonemap_gamma(x, gamma=2.2):
     """
     Applies gamma-compressed Reinhard global tone mapping to input.
-    
-    Supports both torch.Tensor and np.ndarray.
 
     Args:
         x (torch.Tensor or np.ndarray): HDR image, values >= 0
@@ -485,55 +444,56 @@ def reinhard_tonemap_gamma(x, gamma=2.2):
         Same type as input: tone-mapped image in [0, 1] range
     """
     eps = 1e-8
-    if isinstance(x, torch.Tensor):
-        return torch.pow(x / (1.0 + x + eps), 1.0 / gamma)
-    elif isinstance(x, np.ndarray):
-        return np.power(x / (1.0 + x + eps), 1.0 / gamma)
-    else:
-        raise TypeError("Input must be a torch.Tensor or np.ndarray")
+    return torch.pow(x / (1.0 + x + eps), 1.0 / gamma)
 
 
 def reinhard_tonemap(x):
     """
     Applies standard Reinhard global tone mapping: T(v) = v / (1 + v)
-    
-    Supports both torch.Tensor and np.ndarray.
 
     Args:
-        x (torch.Tensor or np.ndarray): HDR image, values >= 0
+        x (torch.Tensor): HDR image, values >= 0
 
     Returns:
         Same type as input: tone-mapped image in [0, 1) range
     """
     eps = 1e-8
-    if isinstance(x, torch.Tensor):
-        x = torch.clamp(x, min=0)
-        return x / (1.0 + x + eps)
-    elif isinstance(x, np.ndarray):
-        x = np.clip(x, a_min=0, a_max=None)
-        return x / (1.0 + x + eps)
-    else:
-        raise TypeError("Input must be a torch.Tensor or np.ndarray")
+    return x / (1.0 + x + eps)
 
 
 def input_tonemap(x):
     """
     Applies SBMC input tone mapping: T_i(v) = (1/10) * ln(1 + v)
-    
-    Supports torch.Tensor and np.ndarray.
 
     Args:
-        x (torch.Tensor or np.ndarray): HDR input image, values >= 0
+        x (torch.Tensor): HDR input image, values >= 0
 
     Returns:
         Same type as input: tone-mapped input
     """
     eps = 1e-8  # small epsilon to avoid log(0)
-    if isinstance(x, torch.Tensor):
-        x = torch.clamp(x, min=0)
-        return (1.0 / 10.0) * torch.log1p(x + eps)
-    elif isinstance(x, np.ndarray):
-        x = np.clip(x, a_min=0, a_max=None)
-        return (1.0 / 10.0) * np.log1p(x + eps)
-    else:
-        raise TypeError("Input must be a torch.Tensor or np.ndarray")
+    return (1.0 / 10.0) * torch.log1p(x + eps)
+
+
+def apply_tonemap(hdr_tensor, tonemap):
+    '''
+    Function called in the loss function to compare prediction of the network to target image.
+
+    Parameters: 
+        hdr_tensor (torch.Tensor): torch tensor in HDR linear space
+        tonemap (str): tonemap type
+
+    Returns: 
+        tonemapped tensor
+    '''
+    if tonemap == 'log':
+        return torch.log1p(hdr_tensor)
+
+    elif tonemap == 'reinhard':
+        return reinhard_tonemap(hdr_tensor)
+        
+    elif tonemap == 'reinhard_gamma': 
+        return reinhard_tonemap_gamma(hdr_tensor)
+
+    else: 
+        return hdr_tensor # no tonemapped applied

@@ -2,15 +2,15 @@
 eval:
   # idx: 27              # Sample index to evaluate
   n_eval_samples: 10
-  hist_checkpoint: checkpoints/2025-07-25_noise2noise_mean_binsimg_none_ep100_supervised.pth
-  img_checkpoint: checkpoints/2025-07-25_noise2noise_mean_binsimg_none_noisy_ep100.pth
+  hist_checkpoint: checkpoints/2025-07-26_noise2noise_mean_binsimg_ep20_lhdr.pth
+  img_checkpoint: checkpoints/2025-07-26_noise2noise_mean_binsimg_ep20_rmse.pth
 
 model:
   in_channels: 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 4
-  start_filters: 48
+  depth: 3
+  start_filters: 32
   learning_rate: 1e-4
 
 dataset:
