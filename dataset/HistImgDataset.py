@@ -178,7 +178,7 @@ class HistogramBinomDataset(Dataset):
             target_tensor = clean_tensor   
         else: 
             target_avg = target_sample.mean(axis=0)                     # (3, H, W)
-            target_tensor = torch.from_numpy(target_avg).float()        # (3, H, W)
+            target_tensor = torch.from_numpy(target_avg).float()        # (3, H, W) 
 
 
         # CROP

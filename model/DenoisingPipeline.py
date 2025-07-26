@@ -12,6 +12,8 @@ import time
 from datetime import datetime
 # Custom
 from model.UNet import UNet
+from model.N2NUnet import N2NUnet
+from model.noise2noise import Noise2Noise
 from dataset.HistImgDataset import HistogramBinomDataset
 from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
@@ -62,14 +64,20 @@ def get_data_loaders(config):
 
 
 def load_model(model_config, model_path, mode, hist_bins=16, device='cpu'):
-    model = UNet(
+    # model = UNet(
+    #     in_channels=model_config['in_channels'],
+    #     n_bins=hist_bins,
+    #     out_mode=model_config['out_mode'],
+    #     merge_mode=model_config['merge_mode'],
+    #     depth=model_config['depth'],
+    #     start_filters=model_config['start_filters'],
+    #     mode=mode
+    # ).to(device)
+
+    model = N2NUnet(
         in_channels=model_config['in_channels'],
-        n_bins=hist_bins,
-        out_mode=model_config['out_mode'],
-        merge_mode=model_config['merge_mode'],
-        depth=model_config['depth'],
-        start_filters=model_config['start_filters'],
-        mode=mode
+        out_channels=3,
+        features=model_config['start_filters']
     ).to(device)
     
     model.load_state_dict(torch.load(model_path, map_location=device))
@@ -93,8 +101,6 @@ def evaluate_sample(model, input_tensor, clean_tensor):
         tonemapped_input = apply_tonemap(input_tensor, "reinhard_gamma")
         pred = model(tonemapped_input)
         clean = clean_tensor
-
-        assert pred.dim() == 3 and clean.dim() == 3
 
         logger.info(f"Target shape: {clean.shape}")      # H, W, 3
         logger.info(f"Pred shape:  {pred.shape}")        # H, W, 3
@@ -153,10 +159,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
                 pred_i = pred[i]
                 clean_i = clean[i]
 
-                pred_tonemapped = apply_tonemap(pred_i, "reinhard_gamma")
-                clean_tonemapped = apply_tonemap(clean_i, "reinhard_gamma")
-
-                total_psnr += compute_psnr(pred_tonemapped, clean_tonemapped)
+                total_psnr += compute_psnr(pred_i, clean_i)
                 count += 1
 
     avg_loss = total_loss / len(dataloader)
@@ -169,15 +172,11 @@ class LHDRLoss(nn.Module):
         super(LHDRLoss, self).__init__()
         self.epsilon = epsilon
 
-    def forward(self, pred, target):
-        '''
-            pred: network output, linear luminance, shape (B, C, H, W)
-            target: ground truth linear luminance, same shape
-        '''
-        # Detach denominator gradient and Compute squared error normalized by squared denominator
-        denominator = (pred.detach() + self.epsilon)
-        loss = ((pred - target) ** 2) / (denominator ** 2)
-        return loss.mean()
+    def forward(self, denoised, target):
+        """Computes loss by unpacking render buffer."""
+
+        loss = ((denoised - target) ** 2) / (denoised + self._eps) ** 2
+        return torch.mean(loss.view(-1))
 
 
 class RelativeMSELoss(nn.Module):
@@ -205,14 +204,19 @@ def train_model(config):
     logger.info(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
 
     # Model
-    model = UNet(
+    # model = UNet(
+    #     in_channels=model_cfg['in_channels'],
+    #     n_bins=dataset_cfg['hist_bins'],
+    #     out_mode=model_cfg['out_mode'],
+    #     merge_mode=model_cfg['merge_mode'],
+    #     depth=model_cfg['depth'],
+    #     start_filters=model_cfg['start_filters'],
+    #     mode=dataset_cfg['mode']
+    # ).to(device)
+
+    model = N2NUnet(
         in_channels=model_cfg['in_channels'],
-        n_bins=dataset_cfg['hist_bins'],
-        out_mode=model_cfg['out_mode'],
-        merge_mode=model_cfg['merge_mode'],
-        depth=model_cfg['depth'],
-        start_filters=model_cfg['start_filters'],
-        mode=dataset_cfg['mode']
+        out_channels=3,
     ).to(device)
 
     # Optimizer + Loss (MSE for Mean)
@@ -336,3 +340,27 @@ def evaluate_model(config):
             target, clean,
             save_path=f'plots/denoised_{idx}.png'
         )
+
+
+def train_n2n(config):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+    
+    # Data Loaders
+    train_loader, val_loader = get_data_loaders(config)
+
+    n2n = Noise2Noise(config, trainable=True)
+    n2n.train(train_loader, val_loader)
+
+
+def test_n2n(config):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+
+    dataset_cfg = config["dataset"]
+    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
+    img_loader = DataLoader(img_dataset, batch_size=1, shuffle=True,  num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=True)
+
+    n2n = Noise2Noise(config, trainable=False)
+    n2n.load_model(config['load_ckpt'])
+    n2n.test(img_loader, show=config['show_output'])

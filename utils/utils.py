@@ -30,41 +30,29 @@ def setup_logger(logfile='run.log'):
 
 def compute_psnr(pred, target):
     '''
-    Computes PSNR (Peak Signal-to-Noise Ratio) between two images,
-    using the dynamic range of the target image.
+    Computes PSNR (Peak Signal-to-Noise Ratio) between HDR images.
 
     Parameters: 
-    - pred (Tensor or ndarray): Predicted image (e.g., denoised output)
-    - target (Tensor or ndarray): Reference clean image
+    - pred (torch.Tensor): Predicted image (e.g., denoised output)
+    - target (torch.Tensor): Reference clean image
 
     Returns: 
     - psnr (float): Peak Signal-to-Noise Ratio in decibels (dB)
     '''
-    # Convert to torch if input is a numpy array
-    if isinstance(pred, np.ndarray):
-        pred = torch.from_numpy(pred)
-    if isinstance(target, np.ndarray):
-        target = torch.from_numpy(target)
-
     # Ensure type is float32 for accurate MSE computation
     pred = pred.float()
     target = target.float()
 
-    # Compute Mean Squared Error
+    # TODO: optional normalise before PSNR to reduce influence of outliers
+
+    # Mean Squared Error MSE
     mse = F.mse_loss(pred, target, reduction='mean').item()
     if mse == 0:
-        return float('inf')  # Perfect match
+        return float('inf')
 
-    # Compute the dynamic range of the target (max - min)
+    # max val of HDR image
     max_val = target.max().item()
-    min_val = target.min().item()
-    dynamic_range = max_val - min_val
-
-    if dynamic_range == 0:
-        return float('inf')  # Avoid log(0) if image is constant
-
-    # Compute PSNR using dynamic range
-    return 20 * math.log10(dynamic_range) - 10 * math.log10(mse)
+    return 10 * math.log10((max_val ** 2) / mse)
 
 
 def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean=None, save_path=None):

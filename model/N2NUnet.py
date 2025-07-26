@@ -1,107 +1,98 @@
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-# --- CORE CONVOLUTIONAL BLOCK ---
-def conv3x3(in_channels, out_channels):
-    return nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-
-class ConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv1 = conv3x3(in_ch, out_ch)
-        self.lrelu1 = nn.LeakyReLU(0.1, inplace=True)
-        self.conv2 = conv3x3(out_ch, out_ch)
-        self.lrelu2 = nn.LeakyReLU(0.1, inplace=True)
-
-    def forward(self, x):
-        x = self.lrelu1(self.conv1(x))
-        x = self.lrelu2(self.conv2(x))
-        return x
 
 
-# --- DOWNSAMPLING LAYER (CONV + POOL) ---
-class DownLayer(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.block = ConvBlock(in_ch, out_ch)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+class N2NUnet(nn.Module):
+    """Custom U-Net architecture for Noise2Noise (see Appendix, Table 2)."""
 
-    def forward(self, x):
-        x = self.block(x)
-        x_pooled = self.pool(x)
-        return x_pooled, x  # return pooled and skip connection
+    def __init__(self, in_channels=3, out_channels=3):
+        """Initializes U-Net."""
 
-# --- UPSAMPLING LAYER (UPSAMPLE + CONCAT + CONV) ---
-class UpLayer(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
-        self.conv = ConvBlock(in_ch, out_ch)
+        super(N2NUnet, self).__init__()
 
-    def forward(self, x, skip):
-        x = self.upsample(x)
-        x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
+        # Layers: enc_conv0, enc_conv1, pool1
+        self._block1 = nn.Sequential(
+            nn.Conv2d(in_channels, 48, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(48, 48, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2))
 
-# --- NOISE2NOISE-LIKE UNET ---
-class Noise2NoiseUNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3, features=48):
-        super().__init__()
+        # Layers: enc_conv(i), pool(i); i=2..5
+        self._block2 = nn.Sequential(
+            nn.Conv2d(48, 48, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2))
 
-        self.enc0 = ConvBlock(in_channels, features)      # CONV0
-        self.pool1 = DownLayer(features, features)        # POOL1
-        self.pool2 = DownLayer(features, features)        # POOL2
-        self.pool3 = DownLayer(features, features)        # POOL3
-        self.pool4 = DownLayer(features, features)        # POOL4
-        self.pool5 = DownLayer(features, features)        # POOL5
+        # Layers: enc_conv6, upsample5
+        self._block3 = nn.Sequential(
+            nn.Conv2d(48, 48, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(48, 48, 3, stride=2, padding=1, output_padding=1))
+            #nn.Upsample(scale_factor=2, mode='nearest'))
 
-        self.bottom = ConvBlock(features, features)       # CONV6
+        # Layers: dec_conv5a, dec_conv5b, upsample4
+        self._block4 = nn.Sequential(
+            nn.Conv2d(96, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(96, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(96, 96, 3, stride=2, padding=1, output_padding=1))
+            #nn.Upsample(scale_factor=2, mode='nearest'))
 
-        self.up5 = UpLayer(features * 2, features)
-        self.up4 = UpLayer(features * 2, features)
-        self.up3 = UpLayer(features * 2, features)
-        self.up2 = UpLayer(features * 2, features)
-        self.up1 = UpLayer(features * 2, features)
+        # Layers: dec_deconv(i)a, dec_deconv(i)b, upsample(i-1); i=4..2
+        self._block5 = nn.Sequential(
+            nn.Conv2d(144, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(96, 96, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(96, 96, 3, stride=2, padding=1, output_padding=1))
+            #nn.Upsample(scale_factor=2, mode='nearest'))
 
-        self.final_conv1 = conv3x3(features + in_channels, 64)
-        self.final_lrelu1 = nn.LeakyReLU(0.1, inplace=True)
-        self.final_conv2 = conv3x3(64, 32)
-        self.final_lrelu2 = nn.LeakyReLU(0.1, inplace=True)
-        self.final_conv3 = conv3x3(32, out_channels)  # No activation
+        # Layers: dec_conv1a, dec_conv1b, dec_conv1c,
+        self._block6 = nn.Sequential(
+            nn.Conv2d(96 + in_channels, 64, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 32, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, out_channels, 3, stride=1, padding=1),
+            nn.LeakyReLU(0.1))
 
-        self._initialize_weights()  # Apply He initialization
+        # Initialize weights
+        self._init_weights()
 
-    def forward(self, x):
-        input_orig = x
 
-        x0 = self.enc0(x)                      # ENC CONV0
-        x1, skip1 = self.pool1(x0)             # POOL1
-        x2, skip2 = self.pool2(x1)             # POOL2
-        x3, skip3 = self.pool3(x2)             # POOL3
-        x4, skip4 = self.pool4(x3)             # POOL4
-        x5, skip5 = self.pool5(x4)             # POOL5
+    def _init_weights(self):
+        """Initializes weights using He et al. (2015)."""
 
-        x_bottom = self.bottom(x5)             # CONV6
-
-        x = self.up5(x_bottom, skip5)          # DEC 5
-        x = self.up4(x, skip4)                 # DEC 4
-        x = self.up3(x, skip3)                 # DEC 3
-        x = self.up2(x, skip2)                 # DEC 2
-        x = self.up1(x, skip1)                 # DEC 1
-
-        # Final concat with original input
-        x = torch.cat([x, input_orig], dim=1)
-
-        x = self.final_lrelu1(self.final_conv1(x))
-        x = self.final_lrelu2(self.final_conv2(x))
-        x = self.final_conv3(x) # No ReLU — linear output
-
-        return x
-
-    def _initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, a=0.1)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+            if isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight.data)
+                m.bias.data.zero_()
+
+
+    def forward(self, x):
+        """Through encoder, then decoder by adding U-skip connections. """
+
+        # Encoder
+        pool1 = self._block1(x)
+        pool2 = self._block2(pool1)
+        pool3 = self._block2(pool2)
+        pool4 = self._block2(pool3)
+        pool5 = self._block2(pool4)
+
+        # Decoder
+        upsample5 = self._block3(pool5)
+        concat5 = torch.cat((upsample5, pool4), dim=1)
+        upsample4 = self._block4(concat5)
+        concat4 = torch.cat((upsample4, pool3), dim=1)
+        upsample3 = self._block5(concat4)
+        concat3 = torch.cat((upsample3, pool2), dim=1)
+        upsample2 = self._block5(concat3)
+        concat2 = torch.cat((upsample2, pool1), dim=1)
+        upsample1 = self._block5(concat2)
+        concat1 = torch.cat((upsample1, x), dim=1)
+
+        # Final activation
+        return self._block6(concat1)
