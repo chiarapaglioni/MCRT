@@ -10,14 +10,15 @@ class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
         self.conv1 = conv3x3(in_ch, out_ch)
-        self.relu1 = nn.ReLU(inplace=True)
+        self.lrelu1 = nn.LeakyReLU(0.1, inplace=True)
         self.conv2 = conv3x3(out_ch, out_ch)
-        self.relu2 = nn.ReLU(inplace=True)
+        self.lrelu2 = nn.LeakyReLU(0.1, inplace=True)
 
     def forward(self, x):
-        x = self.relu1(self.conv1(x))
-        x = self.relu2(self.conv2(x))
+        x = self.lrelu1(self.conv1(x))
+        x = self.lrelu2(self.conv2(x))
         return x
+
 
 # --- DOWNSAMPLING LAYER (CONV + POOL) ---
 class DownLayer(nn.Module):
@@ -35,7 +36,7 @@ class DownLayer(nn.Module):
 class UpLayer(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
         self.conv = ConvBlock(in_ch, out_ch)
 
     def forward(self, x, skip):
@@ -69,6 +70,8 @@ class Noise2NoiseUNet(nn.Module):
         self.final_relu2 = nn.ReLU(inplace=True)
         self.final_conv3 = conv3x3(32, out_channels)  # Linear activation
 
+        self._initialize_weights()  # Apply He initialization
+
     def forward(self, x):
         input_orig = x
 
@@ -95,3 +98,10 @@ class Noise2NoiseUNet(nn.Module):
         x = self.final_conv3(x)  # No ReLU — linear output
 
         return x
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, a=0.1)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
