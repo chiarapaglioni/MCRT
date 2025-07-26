@@ -65,10 +65,10 @@ class Noise2NoiseUNet(nn.Module):
         self.up1 = UpLayer(features * 2, features)
 
         self.final_conv1 = conv3x3(features + in_channels, 64)
-        self.final_relu1 = nn.ReLU(inplace=True)
+        self.final_lrelu1 = nn.LeakyReLU(0.1, inplace=True)
         self.final_conv2 = conv3x3(64, 32)
-        self.final_relu2 = nn.ReLU(inplace=True)
-        self.final_conv3 = conv3x3(32, out_channels)  # Linear activation
+        self.final_lrelu2 = nn.LeakyReLU(0.1, inplace=True)
+        self.final_conv3 = conv3x3(32, out_channels)  # No activation
 
         self._initialize_weights()  # Apply He initialization
 
@@ -93,9 +93,9 @@ class Noise2NoiseUNet(nn.Module):
         # Final concat with original input
         x = torch.cat([x, input_orig], dim=1)
 
-        x = self.final_relu1(self.final_conv1(x))
-        x = self.final_relu2(self.final_conv2(x))
-        x = self.final_conv3(x)  # No ReLU — linear output
+        x = self.final_lrelu1(self.final_conv1(x))
+        x = self.final_lrelu2(self.final_conv2(x))
+        x = self.final_conv3(x) # No ReLU — linear output
 
         return x
 
