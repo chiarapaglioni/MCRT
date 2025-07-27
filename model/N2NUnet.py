@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+
 
 # Basic 3x3 convolution layer
 def conv3x3(in_channels, out_channels):
@@ -125,13 +128,14 @@ class Noise2NoiseUNet(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torchvision import transforms
-from tqdm import tqdm
+
+
+
+
+
+
+
+
 
 
 class ConvBlockLeakyRelu(nn.Module):
@@ -151,12 +155,12 @@ class ConvBlockLeakyRelu(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels=3):
         super(Net, self).__init__()
 
         ## ------- ENCODER -------
         self.enc_conv01 = nn.Sequential(
-            ConvBlockLeakyRelu(3, 48, 3, stride=1, padding=1),
+            ConvBlockLeakyRelu(in_channels, 48, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(48, 48, 3, stride=1, padding=1),
             nn.MaxPool2d(2)
         )
@@ -204,10 +208,13 @@ class Net(nn.Module):
         )
 
         self.dec_conv1abc = nn.Sequential(
-            ConvBlockLeakyRelu(99, 64, 3, stride=1, padding=1),
+            # ConvBlockLeakyRelu(99, 64, 3, stride=1, padding=1),   in_channels = 3 + 96 = 99
+            ConvBlockLeakyRelu(105, 64, 3, stride=1, padding=1),     # in_channels = 9 + 96 = 105
             ConvBlockLeakyRelu(64, 32, 3, stride=1, padding=1),
             nn.Conv2d(32, 3, 3, stride=1, padding=1, bias=True)
         )
+
+        self._initialize_weights()
 
     def forward(self, x):
         ## ------- ENCODER -------
@@ -249,3 +256,10 @@ class Net(nn.Module):
         x = self.dec_conv1abc(x)
 
         return x
+    
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, a=0.1)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
