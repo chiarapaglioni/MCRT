@@ -18,6 +18,8 @@ from utils.utils import save_tiff
 from renderer.SceneRenderer import SceneRenderer
 
 
+# TODO: CHANGE ALL PRINTS WITH LOG!!!!
+
 
 def extract_scene_zip(zip_path):
     """
@@ -101,7 +103,7 @@ def calculate_psnr_rgb(low_img_tensor, high_img_tensor):
     psnr = peak_signal_noise_ratio(high_img, low_img, data_range=data_range)
     print(f"PSNR: {psnr} !!!")
 
-def render_scene(scene_path, output_dir, mi_variant, low_spp, high_spp):
+def render_scene(renderer, scene_path, output_dir, mi_variant, low_spp, high_spp):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Get parts for filename
@@ -110,7 +112,6 @@ def render_scene(scene_path, output_dir, mi_variant, low_spp, high_spp):
     print(f"Rendering {scene_path.name} .....")
 
     # 1 SPP MULTI-RENDER
-    renderer = SceneRenderer(scene_path, debug=False)
     low_images = renderer.render_n_images(n=low_spp, spp=1, seed_start=0)
     stack_low = np.stack(low_images, axis=0)
     low_tiff_path = output_dir / f"{scene_folder_name}_{xml_name}_spp1x{low_spp}.tiff"
@@ -143,6 +144,21 @@ def render_scene(scene_path, output_dir, mi_variant, low_spp, high_spp):
     calculate_psnr_rgb(img_low_avg, img_high)
     plot_images(img_high, img_low, img_low_avg)
 
+
+def render_albedo_and_normal(renderer, scene_path, output_dir):    
+    # Render albedo
+    albedo_img = renderer.render_albedo_image()
+    albedo_path = output_dir / "albedo.tiff"
+    save_tiff(albedo_img, albedo_path)
+    
+    # Render normal
+    normal_img = renderer.render_normal_image()
+    normal_path = output_dir / "normal.tiff"
+    save_tiff(normal_img, normal_path)
+    
+    print(f"Saved albedo and normal maps for {scene_path.name} in {output_dir}")
+
+
 def generate_data(config):
     """
     Process all scene folders inside root_folder.
@@ -170,4 +186,8 @@ def generate_data(config):
 
         # render all xml files of a scene
         for xml_file in xml_files:
-            render_scene(xml_file, output_dir, mi_variant=config["mi_variant"], low_spp=config['low_spp'], high_spp=config['high_spp'])
+            # RENDERER
+            renderer = SceneRenderer(xml_file, debug=False)
+
+            # render_scene(renderer, xml_file, output_dir, mi_variant=config["mi_variant"], low_spp=config['low_spp'], high_spp=config['high_spp'])
+            render_albedo_and_normal(renderer, xml_file, output_dir)
