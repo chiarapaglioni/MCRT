@@ -6,6 +6,7 @@ import tifffile
 import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+       
 
 # Logger
 import logging
@@ -131,23 +132,22 @@ def hist_to_img(img_tensor):
     return img_np
 
 
-def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=False):
-    """
-    Plots a single row of debug images from a training batch for visual inspection.
 
-    Displays:
-    - Input (standardised, histogram-based)
-    - Target (standardised)
-    - Noisy image
-    - Predicted image (optionally denormalised using mean/std/lambda)
-    - Clean image (if available)
-
-    Parameters:
-    - batch (torch.Tensor): dictionary of input tensors (includes 'input', 'target', 'noisy', optional 'clean')
-    - preds (torch.Tensor): model predictions
-    - epoch (int): current epoch number (optional, used in title)
-    - correct: (bool) whether to display the image as gamma corrected or not
+def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=False, save_dir='debug_plots'):
     """
+    Plots and saves a single debug image (idx=0) from the batch for visual inspection.
+
+    Saves:
+    - Input
+    - Target
+    - Noisy
+    - Predicted
+    - Clean (if available)
+
+    All images are saved to `save_dir` with filename indicating epoch and batch.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
     input_imgs = batch['input'].cpu()
     noisy_imgs = batch['noisy'].cpu()
     target_imgs = batch['target'].cpu()
@@ -157,26 +157,35 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     if preds is not None:
         preds = preds.detach().cpu()
 
-    idx = 0
+    idx = 0  # only first image
+    input_img = input_imgs[idx][:3] if input_imgs.shape[1] == 9 else input_imgs[idx]
 
+    # Compute PSNR
+    inp_psnr = compute_psnr(input_img, clean_imgs[idx]) if input_imgs is not None else None
+    pred_psnr = compute_psnr(preds[idx], clean_imgs[idx]) if preds is not None else None
+
+    # Plot
     _, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
 
-    axes[0].imshow(tonemap_gamma_correct(hist_to_img(input_imgs[idx])) if correct else hist_to_img(input_imgs[idx]))
-    axes[0].set_title("Input (Standardised)")
-    axes[1].imshow(tonemap_gamma_correct(hist_to_img(target_imgs[idx])) if correct else hist_to_img(target_imgs[idx]))
-    axes[1].set_title("Target (Standardised)")
-    axes[2].imshow(tonemap_gamma_correct(hist_to_img(noisy_imgs[idx])) if correct else hist_to_img(noisy_imgs[idx]))
-    axes[2].set_title("Noisy")
-    axes[3].imshow(tonemap_gamma_correct(hist_to_img(preds[idx])) if correct else hist_to_img(preds[idx]))
-    axes[3].set_title("Predicted")
-    if clean_imgs is not None:
-        axes[4].imshow(tonemap_gamma_correct(hist_to_img(clean_imgs[idx])) if correct else hist_to_img(clean_imgs[idx]))
-        axes[4].set_title("Clean")
-
-    for ax in axes:
+    def show_img(ax, img_tensor, title):
+        img = tonemap_gamma_correct(hist_to_img(img_tensor)) if correct else hist_to_img(img_tensor)
+        ax.imshow(img)
+        ax.set_title(title)
         ax.axis('off')
-    plt.suptitle(f"Epoch {epoch} Batch {batch_idx}")
-    plt.show()
+
+    inp_title = f"Input\nPSNR: {inp_psnr:.2f} dB" if inp_psnr else "Input"
+    show_img(axes[0], input_img, inp_title)
+    show_img(axes[1], target_imgs[idx], "Target (Standardised)")
+    show_img(axes[2], noisy_imgs[idx], "Noisy")
+    pred_title = f"Predicted\nPSNR: {pred_psnr:.2f} dB" if pred_psnr else "Predicted"
+    show_img(axes[3], preds[idx], pred_title)
+    if clean_imgs is not None:
+        show_img(axes[4], clean_imgs[idx], "Clean")
+
+    plt.suptitle(f"Epoch {epoch}, Batch {batch_idx}")
+    filename = os.path.join(save_dir, f"epoch_{epoch:03d}_batch_{batch_idx:03d}.png")
+    plt.savefig(filename, bbox_inches='tight')
+    plt.close()
 
 
 def save_tiff(data, file_name):
@@ -187,7 +196,7 @@ def save_tiff(data, file_name):
     - data (np array): data to save
     - file_name (str): file name / scene name
     """
-    tifffile.imwrite(file_name, data, compression='lzw', bigtiff=True)
+    tifffile.imwrite(file_name, data, bigtiff=True)
     logger.info(f"Saved {file_name} with shape {data.shape} <3")
 
 
@@ -383,51 +392,6 @@ def standardize_tensor(tensor, eps=1e-8):
     # Standardize
     standardized = (tensor - mean) / std
     return standardized, mean, std
-
-
-def unstandardize_tensor(tensor, mean=None, std=None):
-    """
-    Unstandardizes a tensor using per-channel mean and std.
-
-    Args:
-        tensor (torch.Tensor): Standardized tensor of shape [C, H, W]
-        mean (list, np.ndarray, or torch.Tensor): Per-channel mean
-        std (list, np.ndarray, or torch.Tensor): Per-channel std
-
-    Returns:
-        torch.Tensor: Unstandardized tensor of shape [C, H, W]
-    """
-    if isinstance(mean, (list, tuple, np.ndarray)):
-        mean = torch.tensor(mean, dtype=tensor.dtype, device=tensor.device)
-    if isinstance(std, (list, tuple, np.ndarray)):
-        std = torch.tensor(std, dtype=tensor.dtype, device=tensor.device)
-
-    return tensor * std + mean
-
-
-def boxcox_transform(x, lmbda=0.2, epsilon=1e-6):
-    """
-    Applies the Box-Cox transformation to stabilize variance and make the data more Gaussian-like.
-
-    Args:
-        x (torch.Tensor): Input tensor (should be non-negative or strictly positive).
-        lmbda (float): The Box-Cox lambda parameter controlling the shape of the transformation.
-                       - lmbda = 0: log transform
-                       - lmbda != 0: power transform
-        epsilon (float): A small value added to avoid numerical instability (e.g., log(0)).
-
-    Returns:
-        Tensor: Transformed tensor.
-    """
-    # Ensure all inputs are strictly positive to avoid invalid log or power operations
-    x = x + epsilon
-
-    # Apply log transform if lambda is zero
-    if lmbda == 0:
-        return torch.log(x)
-    else:
-        # Apply the general Box-Cox power transform formula
-        return (x ** lmbda - 1) / lmbda
 
 
 def reinhard_tonemap_gamma(x, gamma=2.2):
