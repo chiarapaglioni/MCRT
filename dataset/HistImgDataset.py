@@ -14,7 +14,7 @@ class HistogramBinomDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
                  data_augmentation: bool = True, virt_size: int = 1000,
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
-                 clean: bool = False, cached_dir: str = None, debug: bool = False, 
+                 clean: bool = False, aov: bool = False, cached_dir: str = None, debug: bool = False, 
                  device: str = None, hist_regeneration: bool = False, scene_names=None, 
                  supervised: bool = False, global_mean = None, global_std = None, 
                  tonemap: str = None, target_split: int = 1, run_mode: str = None):
@@ -27,6 +27,7 @@ class HistogramBinomDataset(Dataset):
         self.high_spp = high_spp
         self.hist_bins = hist_bins
         self.clean = clean
+        self.aov = aov
         self.cached_dir = cached_dir
         self.debug = debug
         self.device = device or torch.device("cpu")
@@ -51,6 +52,8 @@ class HistogramBinomDataset(Dataset):
         self.hist_features = {}         # (scene) -> np.array (H, W, 3, bins)
         self.noisy_images = {}          # (scene) -> tensor (3, H, W)
         self.clean_images = {}          # (scene) -> tensor (3, H, W)
+        self.albedo_images = {}         # (scene) -> tensor (3, H, W)
+        self.normal_images = {}         # (scene) -> tensor (3, H, W)
         self.scene_paths = {}           # (scene) -> folder path
         self.scene_sample_indices = {}  # (scene) -> (list of input idx, target idx)
 
@@ -84,32 +87,39 @@ class HistogramBinomDataset(Dataset):
             spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
             noisy_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.low_spp}.tiff")), None)
             clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
+            albedo_file = next((f for f in os.listdir(folder) if f.endswith(f"albedo.tiff")), None)
+            normal_file = next((f for f in os.listdir(folder) if f.endswith(f"normal.tiff")), None)
 
             assert spp1_file and noisy_file, f"Missing files for scene: {key} in {folder}"
 
             # Load spp1xN images
             spp1_path = os.path.join(folder, spp1_file)
-            spp1_img = tifffile.imread(spp1_path)             # (N=low_spp, H, W, 3)
+            spp1_img = tifffile.imread(spp1_path)                                                  # (N=low_spp, H, W, 3)
 
-            # Load noisy image
+            # NOISY
             noisy_path = os.path.join(folder, noisy_file)
-            noisy_img = tifffile.imread(noisy_path)            # (H, W, 3)
-            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()  # (3, H, W)
+            noisy_img = tifffile.imread(noisy_path)                                                # (H, W, 3)
+            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()          # (3, H, W)
 
             self.scene_paths[key] = folder
 
-            # Load clean image if available
+            # CLEAN
             if self.clean and clean_file:
                 clean_path = os.path.join(folder, clean_file)
-                clean_img = tifffile.imread(clean_path)        # (H, W, 3)
-                self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()  # (3, H, W)
+                clean_img = tifffile.imread(clean_path)                                             # (H, W, 3)
+                self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()       # (3, H, W)
 
-            # Randomly shuffle indices to pick input and target samples from spp1_img
-            indices = list(range(self.low_spp))
-            random.shuffle(indices)
-            input_idx = indices[:self.target_split]
-            target_idx = indices[-self.target_split:]
-            self.scene_sample_indices[key] = (input_idx, target_idx)
+            # AOV
+            if self.aov:
+                # ALBEDO
+                albedo_path = os.path.join(folder, albedo_file)
+                albedo_img = tifffile.imread(albedo_path)                                           # (H, W, 3)
+                self.albedo_images[key] = torch.from_numpy(albedo_img).permute(2, 0, 1).float()     # (3, H, W)
+                # NORMAL
+                normal_path = os.path.join(folder, normal_file)
+                normal_img = tifffile.imread(normal_path)                                           # (H, W, 3)
+                self.normal_images[key] = torch.from_numpy(normal_img).permute(2, 0, 1).float()     # (3, H, W)
+
 
             # Histogram caching (hist mode only)
             if self.mode == 'hist':
@@ -121,7 +131,8 @@ class HistogramBinomDataset(Dataset):
                     self.hist_features[key] = cached['features']   # (H, W, 3, bins)
                 else:
                     logger.info(f"Generating Histogram: {hist_filename}")
-                    input_samples_raw = spp1_img[input_idx]       # (N-1, H, W, 3)
+                    # TODO: to be fixed because moved indices selection in the getitem function
+                    input_samples_raw = spp1_img[0]       # (N-1, H, W, 3)
 
                     # generate_histograms returns (H, W, 3, bins), bins is hist_bins
                     hist, _ = generate_histograms(input_samples_raw, self.hist_bins, self.device)
@@ -150,8 +161,17 @@ class HistogramBinomDataset(Dataset):
         spp1_img = self.spp1_images[scene]                  # (low_spp, H, W, 3)
         noisy_tensor = self.noisy_images[scene]             # (3, H, W)
         clean_tensor = self.clean_images.get(scene, None)   # (3, H, W)
+        albedo_tensor = self.albedo_images.get(scene, None)   # (3, H, W)
+        normal_tensor = self.normal_images.get(scene, None)   # (3, H, W)
 
-        input_idx, target_idx = self.scene_sample_indices[scene]
+        # Randomly shuffle indices to pick input and target samples from spp1_img
+        indices = list(range(self.low_spp))
+        random.shuffle(indices)
+        input_idx = indices[:self.target_split]
+        target_idx = indices[-self.target_split:]
+        # self.scene_sample_indices[key] = (input_idx, target_idx)
+
+        # input_idx, target_idx = self.scene_sample_indices[scene]
         input_samples = spp1_img[input_idx]           # (low_spp-N, 3, H, W)
         target_sample = spp1_img[target_idx]          # (N, 3, H, W)
         
@@ -170,6 +190,10 @@ class HistogramBinomDataset(Dataset):
         else:
             input_avg = input_samples.mean(axis=0)                      # (3, H, W)
             input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
+
+            if self.aov:
+                # Concatenate albedo and normal tensors
+                input_tensor = torch.cat([input_tensor, albedo_tensor, normal_tensor], dim=0)  # (9, H, W)
 
         
         # TARGET

@@ -115,24 +115,34 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
-        hdr_input = batch['input'].to(device)               # B, 3, H, W
+        hdr_input = batch['input'].to(device)               # B, 3, H, W or # B, 9, H, W 
         hdr_target = batch['target'].to(device)             # B, 3, H, W
 
         optimizer.zero_grad()
 
-        # Apply tonemapping to input
+        # Apply tonemapping to input if tonemap != none
         tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
-        pred = model(tonemapped_input)                      # B, 3, H, W (linear space)
+        pred = model(tonemapped_input)                      # B, 3, H, W (HDR space)
 
-        # compute loss in tonemapped space
-        loss = criterion(pred, hdr_target)
+        # DEBUG (statistics)
+        if batch_idx % 10 == 0:
+            # Only take RGB channels if input has more than 3 channels
+            input_rgb = tonemapped_input[:, :3] if tonemapped_input.shape[1] > 3 else tonemapped_input
+
+            logger.info(f"Input (RGB) Min {input_rgb.min():.4f} - Max {input_rgb.max():.4f} - Mean {input_rgb.mean():.4f} - Var {input_rgb.var():.4f}")
+            logger.info(f"Target Min {hdr_target.min():.4f} - Max {hdr_target.max():.4f} - Mean {hdr_target.mean():.4f} - Var {hdr_target.var():.4f}")
+            logger.info(f"Pred Min {pred.min():.4f} - Max {pred.max():.4f} - Mean {pred.mean():.4f} - Var {pred.var():.4f}")
+            logger.info("-------------------------------------------------------------------")
+
+        # LOSS (in tonemapped space if tonemap != none)
+        loss = criterion(apply_tonemap(pred, tonemap=tonemap), apply_tonemap(hdr_target, tonemap=tonemap))
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
 
         # DEBUG (plot the first batch)
-        if debug and epoch==5:
+        if debug and batch_idx==0 and epoch>=0:
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)
@@ -151,8 +161,9 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             hdr_target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)               # B, 3, H, W
 
-            tonemapped_input = apply_tonemap(hdr_input, "reinhard_gamma") 
-            pred = model(tonemapped_input)                  # B, 3, H, W (linear space)
+            # Apply tonemapping to input if tonemap != none
+            tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
+            pred = model(tonemapped_input)                  # B, 3, H, W (HDR space)
 
             loss = criterion(pred, hdr_target)
             total_loss += loss.item()
@@ -160,7 +171,8 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             for i in range(pred.shape[0]):
                 pred_i = pred[i]
                 clean_i = clean[i]
-
+                
+                # PSNR in HDR space
                 total_psnr += compute_psnr(pred_i, clean_i)
                 count += 1
 
@@ -176,18 +188,17 @@ class LHDRLoss(nn.Module):
 
     def forward(self, denoised, target):
         """Computes loss by unpacking render buffer."""
-
-        loss = ((denoised - target) ** 2) / (denoised + self.epsilon) ** 2
+        loss = ((denoised - target) ** 2) / ((denoised + self.epsilon)**2)
         return torch.mean(loss.view(-1))
 
 
 class RelativeMSELoss(nn.Module):
-    def __init__(self, eps=1e-6):
+    def __init__(self, epsilon=1e-6):
         super().__init__()
-        self.eps = eps
+        self.epsilon = epsilon
 
     def forward(self, input, target):
-        return torch.mean((input - target)**2 / (target + self.eps)**2)
+        return torch.mean((input - target)**2 / (target + self.epsilon)**2)
     
 
 # TRAINING LOOP
@@ -205,7 +216,7 @@ def train_model(config):
     logger.info(f"Model Config: Depth={config['model']['depth']} | Start Filters={config['model']['start_filters']} | Output: {config['model']['out_mode']}")
     logger.info(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
 
-    # Model
+    # MODEL
     # model = UNet(
     #     in_channels=model_cfg['in_channels'],
     #     n_bins=dataset_cfg['hist_bins'],
@@ -216,15 +227,15 @@ def train_model(config):
     #     mode=dataset_cfg['mode']
     # ).to(device)
 
-    model = Noise2NoiseUNet(
-        in_channels=model_cfg['in_channels'],
-        out_channels=3,
-        features=model_cfg['start_filters']
-    ).to(device)
+    # model = Noise2NoiseUNet(
+    #     in_channels=model_cfg['in_channels'],
+    #     out_channels=3,
+    #     features=model_cfg['start_filters']
+    # ).to(device)
 
-    # model = Net()
+    model = Net(in_channels=model_cfg['in_channels']).to(device)
 
-    # Optimizer + Loss (MSE for Mean)
+    # OPTIMIZER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
 
     # LOSS FUNCTIONS 
