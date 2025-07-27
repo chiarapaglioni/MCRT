@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 # Custom
 from model.UNet import UNet
-from model.N2NUnet import N2NUnet
+from model.N2NUnet import Noise2NoiseUNet, Net
 from model.noise2noise import Noise2Noise
 from dataset.HistImgDataset import HistogramBinomDataset
 from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
@@ -28,7 +28,7 @@ else:
     device = torch.device("cuda:0")
 
 
-def get_data_loaders(config):
+def get_data_loaders(config, run_mode="train"):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
 
@@ -36,7 +36,7 @@ def get_data_loaders(config):
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if config['standardisation']=='global':
-        full_dataset = HistogramBinomDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std)
+        full_dataset = HistogramBinomDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
     # Split into train/val
     val_ratio = config.get('val_split', 0.2)
@@ -74,7 +74,7 @@ def load_model(model_config, model_path, mode, hist_bins=16, device='cpu'):
     #     mode=mode
     # ).to(device)
 
-    model = N2NUnet(
+    model = Noise2NoiseUNet(
         in_channels=model_config['in_channels'],
         out_channels=3,
         features=model_config['start_filters']
@@ -119,7 +119,9 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         hdr_target = batch['target'].to(device)             # B, 3, H, W
 
         optimizer.zero_grad()
-        tonemapped_input = apply_tonemap(hdr_input, "reinhard_gamma") 
+
+        # Apply tonemapping to input
+        tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
         pred = model(tonemapped_input)                      # B, 3, H, W (linear space)
 
         # compute loss in tonemapped space
@@ -131,7 +133,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
 
         # DEBUG (plot the first batch)
         if debug and epoch==5:
-            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx)
+            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)
 
@@ -175,7 +177,7 @@ class LHDRLoss(nn.Module):
     def forward(self, denoised, target):
         """Computes loss by unpacking render buffer."""
 
-        loss = ((denoised - target) ** 2) / (denoised + self._eps) ** 2
+        loss = ((denoised - target) ** 2) / (denoised + self.epsilon) ** 2
         return torch.mean(loss.view(-1))
 
 
@@ -194,7 +196,7 @@ def train_model(config):
     logger.info(f"Using device: {device}")
     
     # Data Loaders
-    train_loader, val_loader = get_data_loaders(config)
+    train_loader, val_loader = get_data_loaders(config, run_mode="train")
 
     dataset_cfg = config['dataset']
     model_cfg = config['model']
@@ -214,10 +216,13 @@ def train_model(config):
     #     mode=dataset_cfg['mode']
     # ).to(device)
 
-    model = N2NUnet(
+    model = Noise2NoiseUNet(
         in_channels=model_cfg['in_channels'],
         out_channels=3,
+        features=model_cfg['start_filters']
     ).to(device)
+
+    # model = Net()
 
     # Optimizer + Loss (MSE for Mean)
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
@@ -290,8 +295,8 @@ def evaluate_model(config):
 
     dataset_cfg = config["dataset"]
 
-    hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"})
-    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
+    hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
+    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
 
     # Randomly select n indices
     total_samples = len(img_dataset)
@@ -332,13 +337,14 @@ def evaluate_model(config):
         logger.info(f"Hist2Noise PSNR:  {hist_psnr:.2f} dB")
         logger.info(f"Noise2Noise PSNR: {img_psnr:.2f} dB")
 
-        # Save plots
+        # PLOT
         plot_images(
             noisy, init_psnr, 
             hist_pred, hist_psnr, 
             img_pred, img_psnr,
             target, clean,
-            save_path=f'plots/denoised_{idx}.png'
+            save_path=f'plots/denoised_{idx}.png',
+            correct=True        # whether to plot tonemapped + gamma corrected images
         )
 
 

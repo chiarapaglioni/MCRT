@@ -43,8 +43,6 @@ def compute_psnr(pred, target):
     pred = pred.float()
     target = target.float()
 
-    # TODO: optional normalise before PSNR to reduce influence of outliers
-
     # Mean Squared Error MSE
     mse = F.mse_loss(pred, target, reduction='mean').item()
     if mse == 0:
@@ -55,7 +53,21 @@ def compute_psnr(pred, target):
     return 10 * math.log10((max_val ** 2) / mse)
 
 
-def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean=None, save_path=None):
+def tonemap_gamma_correct(hdr_image, gamma=2.2):
+    """
+    Applies Reinhard tone mapping + gamma correction to a HDR image.
+
+    Parameters:
+        hdr_image (np.ndarray): HDR image in linear radiance (float32) shape (H, W, 3)
+        gamma (float): Gamma correction factor (default = 2.2)
+    """  
+    tone_mapped = hdr_image / (1.0 + hdr_image)                     # Reinhard tone mapping
+    display_img = np.power(np.clip(tone_mapped, 0, 1), 1.0 / gamma) # Gamma correction
+    return display_img
+
+
+
+def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean=None, save_path=None, correct=False):
     """
     Plot denoised images generated from the noise2noise and hist2nosie next to the clean one.
 
@@ -66,18 +78,21 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
     - target (torch tensor): noisy target (1 sample)
     - clean (torch tensor): clean GT rendered with high spp
     """
-    def to_img(t):
+    def to_img(t, correct):
         if t.dim() == 4:  # [1, 3, H, W]
             t = t.squeeze(0)
-        return t.detach().cpu().numpy().transpose(1, 2, 0)
+        image = t.detach().cpu().numpy().transpose(1, 2, 0)
+        if correct:
+            image = tonemap_gamma_correct(image)
+        return image
     
     _, axes = plt.subplots(1, 5 if clean is not None else 4, figsize=(20, 4))
-    axes[0].imshow(to_img(noisy));          axes[0].set_title(f"Noisy Input - PSNR:  {init_psnr:.2f} dB")
-    axes[1].imshow(to_img(target));         axes[1].set_title("Target Sample - PSNR")
-    axes[2].imshow(to_img(hist_pred));      axes[2].set_title(f"Hist2Noise Output - PSNR:  {hist_psnr:.2f} dB")
-    axes[3].imshow(to_img(img_pred));       axes[3].set_title(f"Noise2Noise Output - PSNR:  {img_psnr:.2f} dB")
+    axes[0].imshow(to_img(noisy, correct));          axes[0].set_title(f"Noisy Input - PSNR:  {init_psnr:.2f} dB")
+    axes[1].imshow(to_img(target, correct));         axes[1].set_title("Target Sample - PSNR")
+    axes[2].imshow(to_img(hist_pred, correct));      axes[2].set_title(f"Hist2Noise Output - PSNR:  {hist_psnr:.2f} dB")
+    axes[3].imshow(to_img(img_pred, correct));       axes[3].set_title(f"Noise2Noise Output - PSNR:  {img_psnr:.2f} dB")
     if clean is not None:
-        axes[4].imshow(to_img(clean));      axes[4].set_title("Clean (GT)")
+        axes[4].imshow(to_img(clean, correct));      axes[4].set_title("Clean (GT)")
     for ax in axes: ax.axis('off')
     plt.tight_layout()
 
@@ -85,7 +100,6 @@ def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, targ
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight')
         logger.info(f"Plot saved to {save_path}")
-
     plt.show()
 
 
@@ -110,14 +124,14 @@ def hist_to_img(img_tensor):
     else:
         raise ValueError(f"Unexpected tensor shape: {img_tensor.shape}")
 
+    # move image from 3, H, W, ---> H, W, 3
     img_np = img.permute(1, 2, 0).cpu().numpy()
     if img_np.shape[2] == 1:
         img_np = img_np[:, :, 0]
-
     return img_np
 
 
-def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
+def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=False):
     """
     Plots a single row of debug images from a training batch for visual inspection.
 
@@ -129,13 +143,10 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
     - Clean image (if available)
 
     Parameters:
-    - batch: dictionary of input tensors (includes 'input', 'target', 'noisy', optional 'clean')
-    - preds: model predictions (optional, tensor)
-    - epoch: current epoch number (optional, used in title)
-    - batch_idx: index of batch (optional, used in title)
-    - image_mean: tensor of mean values for unnormalising predictions
-    - image_std: tensor of std values for unnormalising predictions
-    - lamda: tensor of Box-Cox lambda values for inverse transform
+    - batch (torch.Tensor): dictionary of input tensors (includes 'input', 'target', 'noisy', optional 'clean')
+    - preds (torch.Tensor): model predictions
+    - epoch (int): current epoch number (optional, used in title)
+    - correct: (bool) whether to display the image as gamma corrected or not
     """
     input_imgs = batch['input'].cpu()
     noisy_imgs = batch['noisy'].cpu()
@@ -150,17 +161,16 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None):
 
     _, axes = plt.subplots(1, 5 if clean_imgs is not None else 4, figsize=(15, 5))
 
-    axes[0].imshow(hist_to_img(input_imgs[idx]))
+    axes[0].imshow(tonemap_gamma_correct(hist_to_img(input_imgs[idx])) if correct else hist_to_img(input_imgs[idx]))
     axes[0].set_title("Input (Standardised)")
-    axes[1].imshow(hist_to_img(target_imgs[idx]))
+    axes[1].imshow(tonemap_gamma_correct(hist_to_img(target_imgs[idx])) if correct else hist_to_img(target_imgs[idx]))
     axes[1].set_title("Target (Standardised)")
-    axes[2].imshow(hist_to_img(noisy_imgs[idx]))
+    axes[2].imshow(tonemap_gamma_correct(hist_to_img(noisy_imgs[idx])) if correct else hist_to_img(noisy_imgs[idx]))
     axes[2].set_title("Noisy")
-    # axes[3].imshow(hist_to_img(preds[idx], mean=image_mean[idx], std=image_std[idx], lamda=lamda[idx].item()))
-    axes[3].imshow(hist_to_img(preds[idx]))
+    axes[3].imshow(tonemap_gamma_correct(hist_to_img(preds[idx])) if correct else hist_to_img(preds[idx]))
     axes[3].set_title("Predicted")
     if clean_imgs is not None:
-        axes[4].imshow(hist_to_img(clean_imgs[idx]))
+        axes[4].imshow(tonemap_gamma_correct(hist_to_img(clean_imgs[idx])) if correct else hist_to_img(clean_imgs[idx]))
         axes[4].set_title("Clean")
 
     for ax in axes:
@@ -232,7 +242,6 @@ def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
     logger.info(f"Saved PSNR plot to {path}")
 
 
-
 def decode_image_from_probs(probs, bin_edges):
     """
     Convert predicted bin probabilities to expected radiance, per batch.
@@ -254,6 +263,7 @@ def decode_image_from_probs(probs, bin_edges):
     pred_radiance = (probs * bin_centers).sum(dim=2)  # (B, C, H, W)
     return pred_radiance
     
+
 
 def decode_pred_logits_zero(probs, bin_edges):
     """

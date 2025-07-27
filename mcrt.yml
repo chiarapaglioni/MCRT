@@ -14,5 +14,7 @@ dependencies:
   - cudatoolkit=11.6
   - pytorch
   - torchvision=0.13.0
+  - torchsummary
+  - openexr
   - pip:
       - mitsuba==3.6.4

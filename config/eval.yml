@@ -2,8 +2,8 @@
 eval:
   # idx: 27              # Sample index to evaluate
   n_eval_samples: 10
-  hist_checkpoint: checkpoints/2025-07-26_noise2noise_mean_binsimg_ep20_lhdr.pth
-  img_checkpoint: checkpoints/2025-07-26_noise2noise_mean_binsimg_ep20_lhdr.pth
+  hist_checkpoint: checkpoints/2025-07-25_noise2noise_mean_binsimg_reinhard_ep100_gpu.pth
+  img_checkpoint: checkpoints/2025-07-25_noise2noise_mean_binsimg_reinhard_ep100_gpu.pth
 
 model:
   in_channels: 3
@@ -39,7 +39,7 @@ noise_param: 50.0                         # e.g., sigma for Gaussian
 seed: null                                # Random seed (optional)
 crop_size: 256                            # Image crop size (note: overrides dataset.crop_size if used)
 
-batch_size: 4
+batch_size: 16
 num_workers: 4
 shuffle: true
 pin_memory: false

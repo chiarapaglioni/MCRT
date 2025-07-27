@@ -33,7 +33,7 @@ def main():
     parser.add_argument('-a', '--adam', help='adam parameters', nargs='+', default=[0.9, 0.99, 1e-8], type=list)
     parser.add_argument('-b', '--batch-size', help='minibatch size', default=4, type=int)
     parser.add_argument('-e', '--nb-epochs', help='number of epochs', default=100, type=int)
-    parser.add_argument('-l', '--loss', help='loss function', choices=['l1', 'l2', 'hdr'], default='l1', type=str)
+    parser.add_argument('-l', '--loss', help='loss function', choices=['l1', 'l2', 'hdr'], default='hdr', type=str)
     parser.add_argument('--cuda', help='use cuda', action='store_true')
     parser.add_argument('--plot-stats', help='plot stats after every epoch', action='store_true')
 
@@ -61,13 +61,13 @@ def main():
 
     # TRAIN (OK) <3
     elif task == "train":
-        # train_model(config)
-        train_n2n(config)
+        train_model(config)
+        # train_n2n(config)
     
     # EVAL (OK) <3
     elif task == "eval":
-        # evaluate_model(config)
-        test_n2n(config)
+        evaluate_model(config)
+        # test_n2n(config)
 
     # GEN-TRAIN (OK) <3
     elif task == "train_gen":

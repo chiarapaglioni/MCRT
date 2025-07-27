@@ -5,13 +5,12 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam, lr_scheduler
 
-from model.N2NUnet import N2NUnet
+from model.N2NUnet_Pytorch import N2NUnet
 from model.utils import *
 
 import os
 import json
 from datetime import datetime
-
 
 
 class Noise2Noise(object):
@@ -34,8 +33,7 @@ class Noise2Noise(object):
             self.model = N2NUnet(in_channels=3)
 
         if self.trainable:
-            self.optim = Adam(self.model.parameters(),
-                              lr=float(self.p["learning_rate_cli"]))
+            self.optim = Adam(self.model.parameters(), lr=float(self.p["learning_rate_cli"]))
 
             self.scheduler = lr_scheduler.ReduceLROnPlateau(
                 self.optim,
@@ -154,8 +152,8 @@ class Noise2Noise(object):
         psnr_meter = AvgMeter()
 
         for batch in valid_loader:
-            source = batch['input']
-            target = batch['noisy']
+            source = batch['noisy']
+            target = batch['clean']
             if self.use_cuda:
                 source = source.cuda()
                 target = target.cuda()
@@ -165,7 +163,8 @@ class Noise2Noise(object):
             loss_meter.update(loss.item())
 
             if self.is_mc:
-                source_denoised = reinhard_tonemap(source_denoised)
+                # source_denoised = reinhard_tonemap(source_denoised)
+                source_denoised = source_denoised
 
             for i in range(self.p["batch_size_cli"]):
                 source_denoised = source_denoised.cpu()
@@ -200,8 +199,8 @@ class Noise2Noise(object):
 
             batch_idx = 0
             for batch in valid_loader:
-                source = batch['input']
-                target = batch['noisy']
+                source = batch['noisy']
+                target = batch['clean']
                 batch_start = datetime.now()
                 progress_bar(batch_idx, num_batches, self.p["report_interval"], loss_meter.val)
 

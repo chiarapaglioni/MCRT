@@ -6,7 +6,6 @@ import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
 from dataset.HistogramGenerator import generate_histograms
-from utils.utils import reinhard_tonemap, input_tonemap, reinhard_tonemap_gamma
 
 import logging
 logger = logging.getLogger(__name__)
@@ -18,7 +17,7 @@ class HistogramBinomDataset(Dataset):
                  clean: bool = False, cached_dir: str = None, debug: bool = False, 
                  device: str = None, hist_regeneration: bool = False, scene_names=None, 
                  supervised: bool = False, global_mean = None, global_std = None, 
-                 tonemap: str = None, target_split: int = 1):
+                 tonemap: str = None, target_split: int = 1, run_mode: str = None):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -34,6 +33,7 @@ class HistogramBinomDataset(Dataset):
         self.hist_regeneration = hist_regeneration
         self.tonemap = tonemap
         self.target_split = target_split
+        self.run_mode = run_mode
 
         # mean/std for normalisation
         # try normalising by only diviing by the mean per image
@@ -116,7 +116,7 @@ class HistogramBinomDataset(Dataset):
                 hist_filename = f"{key}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
                 cache_path = os.path.join(self.cached_dir, hist_filename) if self.cached_dir else None
 
-                if cache_path and os.path.exists(cache_path) and not self.hist_regeneration:
+                if cache_path and os.path.exists(cache_path) or not self.hist_regeneration:
                     cached = np.load(cache_path)
                     self.hist_features[key] = cached['features']   # (H, W, 3, bins)
                 else:
@@ -142,10 +142,11 @@ class HistogramBinomDataset(Dataset):
         return self.virt_size
 
     def __getitem__(self, idx=None, crop_coords=None):
-        if idx is None:     # training
+        if self.run_mode == "train":        # training
             scene = random.choice(self.scene_names)
-        else:               # eval
+        else:                               # eval
             scene = self.scene_names[idx % len(self.scene_names)]
+            
         spp1_img = self.spp1_images[scene]                  # (low_spp, H, W, 3)
         noisy_tensor = self.noisy_images[scene]             # (3, H, W)
         clean_tensor = self.clean_images.get(scene, None)   # (3, H, W)
@@ -169,8 +170,6 @@ class HistogramBinomDataset(Dataset):
         else:
             input_avg = input_samples.mean(axis=0)                      # (3, H, W)
             input_tensor = torch.from_numpy(input_avg).float()          # (3, H, W)
-            # input_tensor = input_tonemap(input_tensor)
-            # input_tensor = reinhard_tonemap_gamma(input_tensor)
 
         
         # TARGET
