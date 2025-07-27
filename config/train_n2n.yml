@@ -7,7 +7,7 @@ dataset:
   hist_bins: 16
   mode: img                               # Options: 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true
-  virt_size: 3000
+  virt_size: 8000
   clean: true                             # Whether to include 'clean' targets if available
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
   debug: true                             # if true saves one plot per epoch in a debug plot folder
@@ -17,6 +17,7 @@ dataset:
   target_split: 16
 
 model:
+  model_name: n2n
   in_channels: 9
   out_mode: mean                          # 'mean' or 'dist'
   merge_mode: concat                      # 'add' or 'concat'
@@ -35,32 +36,6 @@ loss: lhdr                                # 'rmse' or 'lhdr' when output is not 
 val_split: 0.1                            # 10% validation split
 
 # training
-num_epochs: 100
+num_epochs: 300
 save_dir: checkpoints
 input_tonemap: none
-
-# Additional CLI-style arguments (added at root level)
-train_dir: train
-valid_dir: valid
-ckpt_save_path: ckpts
-ckpt_overwrite: true
-report_interval: 5
-train_size: null
-valid_size: null
-
-# Training hyperparameters (CLI overrides)
-learning_rate_cli: 0.001
-adam: [0.9, 0.99, 1e-8]
-batch_size_cli: 4
-nb_epochs: 100
-loss_cli: hdr
-
-cuda: false
-plot_stats: false
-
-# Corruption parameters
-noise_type: mc
-noise_param: 50.0
-seed: null
-crop_size_cli: 128
-clean_targets: false

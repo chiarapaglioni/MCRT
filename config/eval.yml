@@ -1,16 +1,16 @@
-# Evaluation Parameters
 eval:
   # idx: 27              # Sample index to evaluate
   n_eval_samples: 10
-  hist_checkpoint: checkpoints/2025-07-25_noise2noise_mean_binsimg_reinhard_ep100_gpu.pth
-  img_checkpoint: checkpoints/2025-07-25_noise2noise_mean_binsimg_reinhard_ep100_gpu.pth
+  hist_checkpoint: results/n2n/2025-07-27_noise2noise_mean_binsimg_ep100_mse_aov.pth
+  img_checkpoint: results/n2n/2025-07-27_noise2noise_mean_binsimg_ep100_mse.pth
 
 model:
-  in_channels: 3
+  model_name: n2n                       # 'gap' or 'n2n'
+  in_channels: 3                        # 9 if using AOV else 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 4
-  start_filters: 48
+  depth: 4                              # only for GAP model
+  start_filters: 48  
   learning_rate: 1e-4
 
 dataset:
@@ -20,24 +20,16 @@ dataset:
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
+  mode: img
   data_augmentation: false
   virt_size: 100
   clean: true
+  aov: true
   debug: false
+  hist_regeneration: false
   supervised: false
   tonemap: none                         # 'log' or 'reinhard' or 'none'
-  hist_regeneration: false
-
-# Additional runtime and corruption settings
-data: ../data                             # Dataset root path
-load_ckpt: ./../ckpts/mc-1759/n2n-epoch64-0.21617.pt                           # Path to load checkpoint (set to null if unused)
-show_output: 5                            # Pop up window to display outputs
-cuda: true                                # Use CUDA if available
-
-noise_type: gaussian                      # ['gaussian', 'poisson', 'text', 'mc']
-noise_param: 50.0                         # e.g., sigma for Gaussian
-seed: null                                # Random seed (optional)
-crop_size: 256                            # Image crop size (note: overrides dataset.crop_size if used)
+  target_split: 16
 
 batch_size: 16
 num_workers: 4

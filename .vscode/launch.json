@@ -28,11 +28,19 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Training - Denoising",
+            "name": "Training - Denoising - N2N",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
             "args": ["train", "--config", "config/train_cpu.yml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Training - Denoising - H2N",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["train", "--config", "config/train_h2n.yml"],
             "console": "integratedTerminal"
         },
         {
@@ -44,7 +52,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Training - Generative",
+            "name": "Training - Generative - H2H",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",

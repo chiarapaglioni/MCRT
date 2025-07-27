@@ -17,10 +17,11 @@ dataset:
   target_split: 16
 
 model:
-  in_channels: 9
+  model_name: n2n                       # 'gap' or 'n2n'
+  in_channels: 9                        # 9 if using AOV else 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 4
+  depth: 4                              # only for GAP model
   start_filters: 48  
   learning_rate: 1e-4
 
@@ -39,29 +40,3 @@ val_split: 0.1                          # 10% validation split (bigger val bette
 num_epochs: 20
 save_dir: checkpoints
 input_tonemap: none
-
-# Additional CLI-style arguments (added at root level)
-train_dir: train
-valid_dir: valid
-ckpt_save_path: ckpts
-ckpt_overwrite: true
-report_interval: 5
-train_size: null
-valid_size: null
-
-# Training hyperparameters (CLI overrides)
-learning_rate_cli: 0.001
-adam: [0.9, 0.99, 1e-8]
-batch_size_cli: 4
-nb_epochs: 100
-loss_cli: hdr
-
-cuda: false
-plot_stats: false
-
-# Corruption parameters
-noise_type: mc
-noise_param: 50.0
-seed: null
-crop_size_cli: 128
-clean_targets: false

@@ -44,7 +44,8 @@ From project root:
 ```bash
 python launch.py data_gen
 python launch.py data_loader
-python launch.py train
+python launch.py train --config config/train_n2n.yml            # for standard Noise2Noise
+python launch.py train --config config/train_h2n.yml            # for Hist2Noise
 python launch.py eval
 python launch.py train_gen
 python launch.py eval_gen
