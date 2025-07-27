@@ -3,8 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 # Datasets
-from dataset.HistImgDataset import HistogramBinomDataset
-from dataset.HistDataset import HistogramDataset
+from dataset.HistImgDataset import HistogramDataset, HistogramBinomDataset
 
 # Logger
 import logging
@@ -59,11 +58,11 @@ def test_data_loader(config):
 
     # Pick dataset
     if out_mode == "dist":
-        dataset = HistogramDataset(**dataset_cfg)
+        dataset = HistogramBinomDataset(**dataset_cfg)
         input_key = 'input_hist'
         target_key = 'target_hist'
     elif out_mode == "mean":
-        dataset = HistogramBinomDataset(**dataset_cfg)
+        dataset = HistogramDataset(**dataset_cfg)
         input_key = 'input'
         target_key = 'target'
     else:
@@ -96,7 +95,7 @@ def test_data_loader(config):
                 input_img = input_tensor.numpy().transpose(1, 2, 0)
                 target_img = target_tensor.numpy().transpose(1, 2, 0)
 
-                fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+                _, axs = plt.subplots(1, 2, figsize=(12, 6))
                 axs[0].imshow(np.clip(input_img, 0, 1))
                 axs[0].set_title("Input Image")
                 axs[0].axis("off")
@@ -112,7 +111,7 @@ def test_data_loader(config):
                 used_bins = input_hist.shape[1] - 2
                 target_img = target_tensor.numpy().transpose(1, 2, 0)
 
-                fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+                _, axs = plt.subplots(1, 2, figsize=(12, 6))
                 plot_hist_bar(axs[0], input_hist, "Input Histogram", x, y, used_bins)
                 axs[1].imshow(np.clip(target_img, 0, 1))
                 axs[1].set_title("Target Image")
@@ -125,7 +124,7 @@ def test_data_loader(config):
             target_hist = target_tensor.numpy()
             used_bins = input_hist.shape[1] - 2
 
-            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+            _, axs = plt.subplots(1, 2, figsize=(12, 6))
             plot_hist_bar(axs[0], input_hist, "Input Histogram", x, y, used_bins)
             plot_hist_bar(axs[1], target_hist, "Target Histogram", x, y, used_bins)
             plt.tight_layout()

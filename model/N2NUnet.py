@@ -154,6 +154,7 @@ class ConvBlockLeakyRelu(nn.Module):
         return self.block(x)
 
 
+# TODO: maybe double size of the network for hist mode since the in_channels are 54
 class Net(nn.Module):
     def __init__(self, in_channels=3):
         super(Net, self).__init__()
@@ -208,8 +209,7 @@ class Net(nn.Module):
         )
 
         self.dec_conv1abc = nn.Sequential(
-            # ConvBlockLeakyRelu(99, 64, 3, stride=1, padding=1),   in_channels = 3 + 96 = 99
-            ConvBlockLeakyRelu(105, 64, 3, stride=1, padding=1),     # in_channels = 9 + 96 = 105
+            ConvBlockLeakyRelu(96 + in_channels, 64, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(64, 32, 3, stride=1, padding=1),
             nn.Conv2d(32, 3, 3, stride=1, padding=1, bias=True)
         )

@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 # Utils
 import os
 import math
@@ -13,8 +14,8 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 # Custom
 from model.UNet import UNet
-from dataset.HistDataset import HistogramDataset
-from utils.utils import save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot
+from dataset.HistImgDataset import HistogramBinomDataset
+from utils.utils import load_model, save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot
 
 import logging
 logger = logging.getLogger(__name__)
@@ -26,19 +27,28 @@ def get_generative_dataloaders(config, device):
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
     dataset_cfg['device'] = device  
 
-    dataset = HistogramDataset(**dataset_cfg)
+    full_dataset = HistogramBinomDataset(**dataset_cfg)
 
+    total_len = len(full_dataset)
     val_ratio = config.get('val_split', 0.1)
-    val_len = int(len(dataset) * val_ratio)
-    train_len = len(dataset) - val_len
+    val_len = int(total_len * val_ratio)
+    train_len = total_len - val_len
 
-    train_set, val_set = torch.utils.data.random_split(dataset, [train_len, val_len])
+    train_set, val_set = random_split(full_dataset, [train_len, val_len])
 
-    logger.info(f"Training set size:  {train_len}")
-    logger.info(f"Validation set size: {val_len}")
+    logger.info(f"Total dataset size: {total_len}")
+    logger.info(f"Training set size:  {len(train_set)}")
+    logger.info(f"Validation set size: {len(val_set)}")
 
     train_loader = DataLoader(train_set, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
     val_loader = DataLoader(val_set, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+
+    sample = next(iter(train_loader))
+    logger.info(f"Input shape:  {sample['input_hist'].shape}")
+    logger.info(f"Target shape: {sample['target_hist'].shape}")
+    logger.info(f"Bin Edges:  {sample['bin_edges'].shape}")
+    if 'clean' in sample and sample['clean'] is not None:
+        logger.info(f"Clean shape:  {sample['clean'].shape}")
 
     return train_loader, val_loader
 
@@ -346,11 +356,13 @@ def train_histogram_generator(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Training on {device}")
 
+    # DATA LOADERS
     train_loader, val_loader = get_generative_dataloaders(config, device)
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
     n_bins = dataset_cfg["hist_bins"]
 
+    # MODEL
     model = UNet(
         in_channels=model_cfg["in_channels"],
         n_bins=n_bins,
@@ -361,14 +373,19 @@ def train_histogram_generator(config):
         mode=dataset_cfg["mode"]
     ).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    # LOSS
     loss_fn = CustomCrossEntropyLoss()
     # loss_fn = EntropyWeightedCrossEntropyLoss()         # not working well because majority of data is skewed left !
+
+    # OPTIMIZER & LR SCHEDULER
+    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
 
     best_val_loss = float("inf")
     train_losses, val_losses = [], []
     psnr_values = []
 
+    # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")
     model_name = f"{datetime.now().strftime('%Y%m%d')}_hist2hist_{model_cfg['out_mode']}_{config['num_epochs']}ep.pth"
     save_path = Path(config["save_dir"]) / model_name
@@ -386,6 +403,8 @@ def train_histogram_generator(config):
         val_losses.append(val_loss)
         psnr_values.append(val_psnr)
 
+        scheduler.step(val_loss)
+
         logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | PSNR: {val_psnr:.2f} dB | Time: {time.time() - start_time:.2f}s")
 
         if val_loss < best_val_loss:
@@ -402,11 +421,13 @@ def train_histogram_residual(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Training on {device}")
 
+    # DATA LOADERS
     train_loader, val_loader = get_generative_dataloaders(config, device)
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
     n_bins = dataset_cfg["hist_bins"]
 
+    # MODEL
     model = UNet(
         in_channels=model_cfg["in_channels"],
         n_bins=n_bins,
@@ -417,13 +438,18 @@ def train_histogram_residual(config):
         mode=dataset_cfg["mode"]
     ).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    # LOSS FUNCTION
     loss_fn = nn.MSELoss()
+
+    # OPTIMIZER & LR SCHEDULER
+    optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
 
     best_val_loss = float("inf")
     train_losses, val_losses = [], []
     psnr_values = []
 
+    # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")
     model_name = f"{datetime.now().strftime('%Y%m%d')}_hist2hist_{model_cfg['out_mode']}_{config['num_epochs']}ep.pth"
     save_path = Path(config["save_dir"]) / model_name
@@ -441,6 +467,8 @@ def train_histogram_residual(config):
         val_losses.append(val_loss)
         psnr_values.append(val_psnr)
 
+        scheduler.step(val_loss)
+
         logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | PSNR: {val_psnr:.2f} dB | Time: {time.time() - start_time:.2f}s")
 
         if val_loss < best_val_loss:
@@ -457,24 +485,16 @@ def run_generative_accumulation_pipeline(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {device}")
 
-    # Load dataset
+    # Config
     dataset_cfg = config["dataset"]
-    dataset = HistogramDataset(**dataset_cfg)
+    model_cfg = config["model"]
+
+    # Dataset
+    dataset = HistogramBinomDataset(**dataset_cfg)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
 
     # Load model
-    model_cfg = config["model"]
-    model = UNet(
-        in_channels=model_cfg["in_channels"],
-        n_bins=dataset_cfg["hist_bins"],
-        out_mode=model_cfg["out_mode"],
-        merge_mode=model_cfg["merge_mode"],
-        depth=model_cfg["depth"],
-        start_filters=model_cfg["start_filters"],
-        mode=dataset_cfg["mode"]
-    ).to(device)
-    model.load_state_dict(torch.load(config['model_path'], map_location=device))
-    model.eval()
+    model = load_model(model_cfg, config['model_path'], mode="hist", device=device)
 
     output_dir = Path(config.get("output_dir", "plots"))
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -561,7 +581,7 @@ def iterative_evaluate(config):
     num_samples = config.get("num_samples", 4)
     num_steps = config.get("num_steps", 10)
 
-    dataset = HistogramDataset(**dataset_cfg)
+    dataset = HistogramBinomDataset(**dataset_cfg)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=config['num_workers'], shuffle=False)
 
     model_cfg = config["model"]

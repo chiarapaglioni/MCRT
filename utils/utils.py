@@ -6,7 +6,9 @@ import tifffile
 import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-       
+# Models
+from model.UNet import UNet
+from model.N2NUnet import Net
 
 # Logger
 import logging
@@ -27,6 +29,30 @@ def setup_logger(logfile='run.log'):
         ]
     )
     return logging.getLogger()
+
+
+def load_model(model_config, model_path, mode='img', hist_bins=16, device='cpu'):
+    # GAP
+    if model_config['model_name']=='gap':
+        model = UNet(
+            in_channels=model_config['in_channels'],
+            n_bins=hist_bins,
+            out_mode=model_config['out_mode'],
+            merge_mode=model_config['merge_mode'],
+            depth=model_config['depth'],
+            start_filters=model_config['start_filters'],
+            mode=mode
+        ).to(device)
+
+    # Noise2Noise
+    elif model_config['model_name']=='n2n':
+        model = Net(
+            in_channels=model_config['in_channels']
+        ).to(device)
+    
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    return model
 
 
 def compute_psnr(pred, target):

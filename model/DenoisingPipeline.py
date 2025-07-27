@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 # Path
 import os
 import random
@@ -13,9 +14,8 @@ from datetime import datetime
 # Custom
 from model.UNet import UNet
 from model.N2NUnet import Noise2NoiseUNet, Net
-from model.noise2noise import Noise2Noise
-from dataset.HistImgDataset import HistogramBinomDataset
-from utils.utils import plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
+from dataset.HistImgDataset import HistogramDataset, ImageDataset
+from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
 # Logger
 import logging
@@ -28,6 +28,28 @@ else:
     device = torch.device("cuda:0")
 
 
+
+# LOSS FUNCTIONS
+class LHDRLoss(nn.Module):
+    def __init__(self, epsilon=0.01):
+        super(LHDRLoss, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, denoised, target):
+        """Computes loss by unpacking render buffer."""
+        loss = ((denoised - target) ** 2) / ((denoised + self.epsilon)**2)
+        return torch.mean(loss.view(-1))
+
+
+class RelativeMSELoss(nn.Module):
+    def __init__(self, epsilon=1e-6):
+        super().__init__()
+        self.epsilon = epsilon
+
+    def forward(self, input, target):
+        return torch.mean((input - target)**2 / (target + self.epsilon)**2)
+
+
 def get_data_loaders(config, run_mode="train"):
     dataset_cfg = config['dataset'].copy()
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
@@ -36,10 +58,10 @@ def get_data_loaders(config, run_mode="train"):
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if config['standardisation']=='global':
-        full_dataset = HistogramBinomDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
     # Split into train/val
-    val_ratio = config.get('val_split', 0.2)
+    val_ratio = config.get('val_split', 0.1)
     total_len = len(full_dataset)
     val_len   = int(total_len * val_ratio)
     train_len = total_len - val_len
@@ -61,28 +83,6 @@ def get_data_loaders(config, run_mode="train"):
         logger.info(f"Clean shape:  {sample['clean'].shape}")
 
     return train_loader, val_loader
-
-
-def load_model(model_config, model_path, mode, hist_bins=16, device='cpu'):
-    # model = UNet(
-    #     in_channels=model_config['in_channels'],
-    #     n_bins=hist_bins,
-    #     out_mode=model_config['out_mode'],
-    #     merge_mode=model_config['merge_mode'],
-    #     depth=model_config['depth'],
-    #     start_filters=model_config['start_filters'],
-    #     mode=mode
-    # ).to(device)
-
-    model = Noise2NoiseUNet(
-        in_channels=model_config['in_channels'],
-        out_channels=3,
-        features=model_config['start_filters']
-    ).to(device)
-    
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
-    return model
 
 
 def get_sample(dataset, idx=0, device='cpu'):
@@ -181,34 +181,15 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
     return avg_loss, avg_psnr
 
 
-class LHDRLoss(nn.Module):
-    def __init__(self, epsilon=0.01):
-        super(LHDRLoss, self).__init__()
-        self.epsilon = epsilon
-
-    def forward(self, denoised, target):
-        """Computes loss by unpacking render buffer."""
-        loss = ((denoised - target) ** 2) / ((denoised + self.epsilon)**2)
-        return torch.mean(loss.view(-1))
-
-
-class RelativeMSELoss(nn.Module):
-    def __init__(self, epsilon=1e-6):
-        super().__init__()
-        self.epsilon = epsilon
-
-    def forward(self, input, target):
-        return torch.mean((input - target)**2 / (target + self.epsilon)**2)
-    
-
 # TRAINING LOOP
 def train_model(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
-    # Data Loaders
+    # DATA LOADERS
     train_loader, val_loader = get_data_loaders(config, run_mode="train")
 
+    # CONFIG
     dataset_cfg = config['dataset']
     model_cfg = config['model']
 
@@ -217,26 +198,31 @@ def train_model(config):
     logger.info(f"Training for {config['num_epochs']} epochs | Batch Size: {config['batch_size']} | Val Split: {config['val_split']} | Learning Rate: {config['model']['learning_rate']}\n")
 
     # MODEL
-    # model = UNet(
-    #     in_channels=model_cfg['in_channels'],
-    #     n_bins=dataset_cfg['hist_bins'],
-    #     out_mode=model_cfg['out_mode'],
-    #     merge_mode=model_cfg['merge_mode'],
-    #     depth=model_cfg['depth'],
-    #     start_filters=model_cfg['start_filters'],
-    #     mode=dataset_cfg['mode']
-    # ).to(device)
+    if model_cfg['model_name'] == 'gap':
+        model = UNet(
+            in_channels=model_cfg['in_channels'],
+            n_bins=dataset_cfg['hist_bins'],
+            out_mode=model_cfg['out_mode'],
+            merge_mode=model_cfg['merge_mode'],
+            depth=model_cfg['depth'],
+            start_filters=model_cfg['start_filters'],
+            mode=dataset_cfg['mode']
+        ).to(device)
 
-    # model = Noise2NoiseUNet(
-    #     in_channels=model_cfg['in_channels'],
-    #     out_channels=3,
-    #     features=model_cfg['start_filters']
-    # ).to(device)
-
-    model = Net(in_channels=model_cfg['in_channels']).to(device)
+    elif model_cfg['model_name'] == 'n2n':
+        # model = Noise2NoiseUNet(
+        #     in_channels=model_cfg['in_channels'],
+        #     out_channels=3,
+        #     features=model_cfg['start_filters']
+        # ).to(device)
+        model = Net(in_channels=model_cfg['in_channels']).to(device)
 
     # OPTIMIZER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
+
+    # LR SCHEDULER
+    # reduces learning rate if val loss has not decreased in the last 10 epochs
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
 
     # LOSS FUNCTIONS 
     logger.info(f"Using Tonemap: {dataset_cfg['tonemap'].upper()}")
@@ -266,7 +252,6 @@ def train_model(config):
     best_val_loss = float('inf')
     logger.info("TRAINING STARTED !")
 
-    # store loss values for plot
     train_losses = []
     val_losses = []
     psnr_values = []
@@ -281,12 +266,13 @@ def train_model(config):
         val_losses.append(val_loss)
         psnr_values.append(val_psnr)
 
+        scheduler.step(val_loss)
+
         epoch_time = time.time() - start_time
         logger.info(f"[Epoch {epoch+1}/{config['num_epochs']}] "
             f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PSNR: {val_psnr:.2f} dB "
             f"| Time: {epoch_time:.2f}s")
 
-        # TODO: choose best mode based also on PSNR
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), save_path)
@@ -297,7 +283,11 @@ def train_model(config):
     save_psnr_plot(psnr_values, save_dir="plots", filename=f"{date_str}_{dataset_cfg['mode']}_psnr_plot.png")
 
 
+# EVALUATE MODELS
 def evaluate_model(config):
+    """
+    Evaluates model using using histograms vs. images
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Evaluating on device: {device}")
 
@@ -305,9 +295,10 @@ def evaluate_model(config):
     n_samples = config["eval"].get("n_eval_samples", 5)
 
     dataset_cfg = config["dataset"]
+    model_cfg = config['model']
 
-    hist_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
-    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
+    hist_dataset = HistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
+    img_dataset = ImageDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
 
     # Randomly select n indices
     total_samples = len(img_dataset)
@@ -315,9 +306,8 @@ def evaluate_model(config):
     logger.info(f"Randomly selected indices: {selected_indices}")
 
     # Load models
-    # hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="hist", device=device)
-    hist_model = load_model(config['model'], config["eval"]["hist_checkpoint"], mode="img", device=device)
-    img_model = load_model(config['model'], config["eval"]["img_checkpoint"], mode="img", device=device)
+    hist_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="hist", device=device)
+    img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
 
     for idx in selected_indices:
         logger.info(f"\nEvaluating index: {idx}")
@@ -338,8 +328,7 @@ def evaluate_model(config):
         scene = hist_sample["scene"]
 
         # Evaluate models
-        # hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean, tonemap=dataset_cfg['tonemap'])
-        hist_pred, hist_psnr = evaluate_sample(hist_model, img_input, clean)
+        hist_pred, hist_psnr = evaluate_sample(hist_model, hist_input, clean)
         img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
         init_psnr = compute_psnr(noisy, clean)
 
@@ -359,25 +348,67 @@ def evaluate_model(config):
         )
 
 
-def train_n2n(config):
+def evaluate_model_aov(config):
+    """
+    Evaluates model using img denoising with and without AOVs
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Using device: {device}")
-    
-    # Data Loaders
-    train_loader, val_loader = get_data_loaders(config)
+    logger.info(f"Evaluating on device: {device}")
 
-    n2n = Noise2Noise(config, trainable=True)
-    n2n.train(train_loader, val_loader)
-
-
-def test_n2n(config):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Using device: {device}")
+    # Number of random samples to evaluate
+    n_samples = config["eval"].get("n_eval_samples", 5)
 
     dataset_cfg = config["dataset"]
-    img_dataset = HistogramBinomDataset(**{**dataset_cfg, "mode": "img"})
-    img_loader = DataLoader(img_dataset, batch_size=1, shuffle=True,  num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=True)
+    model_cfg = config['model']
 
-    n2n = Noise2Noise(config, trainable=False)
-    n2n.load_model(config['load_ckpt'])
-    n2n.test(img_loader, show=config['show_output'])
+    aov_dataset = ImageDataset(**{**dataset_cfg, "aov": True}, run_mode="test")
+    img_dataset = ImageDataset(**{**dataset_cfg, "aov": False}, run_mode="test")
+
+    # Randomly select n indices
+    total_samples = len(img_dataset)
+    selected_indices = random.sample(range(total_samples), n_samples)
+    logger.info(f"Randomly selected indices: {selected_indices}")
+
+    # Load models
+    model_cfg["in_channels"] = 9
+    aov_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="img", device=device)
+    model_cfg["in_channels"] = 3
+    img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
+
+    for idx in selected_indices:
+        logger.info(f"\nEvaluating index: {idx}")
+
+        # Get samples
+        aov_sample = aov_dataset.__getitem__(idx)
+        crop_coords = aov_sample["crop_coords"]
+        img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
+
+        # Prepare inputs
+        aov_input = aov_sample["input"].unsqueeze(0).to(device)
+        img_input = img_sample["input"].unsqueeze(0).to(device)
+        target = aov_sample["target"].to(device)
+        noisy = aov_sample["noisy"].to(device)
+        clean = aov_sample.get("clean", None)
+        if clean is not None:
+            clean = clean.to(device)
+        scene = aov_sample["scene"]
+
+        # Evaluate models
+        aov_pred, aov_psnr = evaluate_sample(aov_model, aov_input, clean)
+        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
+        init_psnr = compute_psnr(noisy, clean)
+
+        logger.info(f"Scene: {scene}")
+        logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
+        logger.info(f"AOV PSNR:  {aov_psnr:.2f} dB")
+        logger.info(f"No AOV PSNR: {img_psnr:.2f} dB")
+
+        # PLOT
+        plot_images(
+            noisy, init_psnr, 
+            aov_pred, aov_psnr, 
+            img_pred, img_psnr,
+            target, clean,
+            save_path=f'plots/denoised_{idx}.png',
+            correct=True        # whether to plot tonemapped + gamma corrected images
+        )
