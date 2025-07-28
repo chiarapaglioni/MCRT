@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 # Custom
-from model.UNet import UNet
+from model.UNet import GapUNet
 from dataset.HistImgDataset import HistogramBinomDataset
 from utils.utils import load_model, save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot
 
@@ -363,7 +363,7 @@ def train_histogram_generator(config):
     n_bins = dataset_cfg["hist_bins"]
 
     # MODEL
-    model = UNet(
+    model = GapUNet(
         in_channels=model_cfg["in_channels"],
         n_bins=n_bins,
         out_mode=model_cfg["out_mode"],
@@ -428,7 +428,7 @@ def train_histogram_residual(config):
     n_bins = dataset_cfg["hist_bins"]
 
     # MODEL
-    model = UNet(
+    model = GapUNet(
         in_channels=model_cfg["in_channels"],
         n_bins=n_bins,
         out_mode=model_cfg["out_mode"],
@@ -585,7 +585,7 @@ def iterative_evaluate(config):
     dataloader = DataLoader(dataset, batch_size=1, num_workers=config['num_workers'], shuffle=False)
 
     model_cfg = config["model"]
-    model = UNet(
+    model = GapUNet(
         in_channels=model_cfg["in_channels"],
         n_bins=n_bins,
         out_mode=model_cfg["out_mode"],
@@ -727,7 +727,7 @@ def test_histogram_generator(config):
     n_bins = dataset_cfg["hist_bins"]
 
     # Load model
-    model = UNet(
+    model = GapUNet(
         in_channels=model_cfg["in_channels"],
         n_bins=n_bins,
         out_mode=model_cfg["out_mode"],

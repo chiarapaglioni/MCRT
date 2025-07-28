@@ -96,7 +96,7 @@ class UpConv(nn.Module):
         x = F.relu(self.conv3(x) + x_skip)  # residual add
         return x
 
-class UNet(nn.Module):
+class GapUNet(nn.Module):
     def __init__(self, in_channels=3, n_bins=32, out_mode='mean',
                  merge_mode='concat', depth=4, start_filters=64,
                  mode='hist'):
@@ -110,7 +110,7 @@ class UNet(nn.Module):
             start_filters: number of filters in first conv block
             mode: 'hist' or 'img' input type
         """
-        super(UNet, self).__init__()
+        super(GapUNet, self).__init__()
         assert merge_mode in ('add', 'concat'), "merge_mode must be 'add' or 'concat'"
         assert mode in ('hist', 'img'), "mode must be 'hist' or 'img'"
 

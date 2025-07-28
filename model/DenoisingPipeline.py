@@ -12,8 +12,8 @@ from pathlib import Path
 import time
 from datetime import datetime
 # Custom
-from model.UNet import UNet
-from model.N2NUnet import Noise2NoiseUNet, Net
+from model.UNet import GapUNet
+from model.N2NUnet import N2Net
 from dataset.HistImgDataset import HistogramDataset, ImageDataset
 from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
@@ -202,7 +202,7 @@ def train_model(config):
 
     # MODEL
     if model_cfg['model_name'] == 'gap':
-        model = UNet(
+        model = GapUNet(
             in_channels=model_cfg['in_channels'],
             n_bins=dataset_cfg['hist_bins'],
             out_mode=model_cfg['out_mode'],
@@ -213,12 +213,7 @@ def train_model(config):
         ).to(device)
 
     elif model_cfg['model_name'] == 'n2n':
-        # model = Noise2NoiseUNet(
-        #     in_channels=model_cfg['in_channels'],
-        #     out_channels=3,
-        #     features=model_cfg['start_filters']
-        # ).to(device)
-        model = Net(in_channels=model_cfg['in_channels']).to(device)
+        model = N2Net(in_channels=model_cfg['in_channels']).to(device)
 
     # OPTIMIZER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))

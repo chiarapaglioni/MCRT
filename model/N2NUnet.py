@@ -7,7 +7,6 @@ class ConvBlockLeakyRelu(nn.Module):
     '''
     A block containing a Conv2d followed by a leakyRelu
     '''
-
     def __init__(self, chanel_in, chanel_out, kernel_size, stride=1, padding=1):
         super(ConvBlockLeakyRelu, self).__init__()
         self.block = nn.Sequential(
@@ -19,9 +18,9 @@ class ConvBlockLeakyRelu(nn.Module):
         return self.block(x)
 
 
-class Net(nn.Module):
+class N2Net(nn.Module):
     def __init__(self, in_channels=9):
-        super(Net, self).__init__()
+        super(N2Net, self).__init__()
         self.in_channels = in_channels
 
         # ---- Dynamic base width ----
