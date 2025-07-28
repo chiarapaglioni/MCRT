@@ -177,14 +177,34 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     input_imgs = batch['input'].cpu()
     noisy_imgs = batch['noisy'].cpu()
     target_imgs = batch['target'].cpu()
-    clean_imgs = batch.get('clean')
+    clean_imgs = batch.get('clean', None)
+    bin_edges = batch.get('bin_edges', None)
     if clean_imgs is not None:
         clean_imgs = clean_imgs.cpu()
     if preds is not None:
         preds = preds.detach().cpu()
 
     idx = 0  # only first image
-    input_img = input_imgs[idx][:3] if input_imgs.shape[1] == 9 else input_imgs[idx]
+    B, _, H, W = input_imgs.shape
+
+    # Handle img and hist data
+    if input_imgs.shape[1] == 9:
+        input_img = input_imgs[idx][:3]
+    elif input_imgs.shape[1] > 9 and bin_edges is not None:
+        bins = bin_edges.shape[1] - 1
+        hist_size = bins * 3
+        hist_decoded = input_imgs[:, :hist_size]                # (B, bins*3, H, W)
+        hist_decoded = hist_decoded.view(B, 3, bins, H, W)      # (B, 3, bins, H, W)
+        imgs_decoded = [
+                decode_image_from_probs(
+                probs=hist_decoded[i:i+1],         # (1, 3, bins, H, W)
+                bin_edges=bin_edges[i:i+1]         # (1, bins+1)
+            )[0]                                   # remove batch dim after decoding
+            for i in range(B)
+        ]
+        input_img = imgs_decoded[idx]
+    else: 
+        input_img = input_imgs[idx]
 
     # Compute PSNR
     inp_psnr = compute_psnr(input_img, clean_imgs[idx]) if input_imgs is not None else None
@@ -212,6 +232,14 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     filename = os.path.join(save_dir, f"epoch_{epoch:03d}_batch_{batch_idx:03d}.png")
     plt.savefig(filename, bbox_inches='tight')
     plt.close()
+
+
+def gen_save_hist(data):
+    """
+    Generates and saves histogram data to npz files.
+    """
+    # TODO: move hist generation logic here to avoid repetitions in data loaders
+    print("To be Implemented !!!!")
 
 
 def save_tiff(data, file_name):

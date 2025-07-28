@@ -164,7 +164,7 @@ class ImageDataset(Dataset):
             target_avg = target_sample.mean(axis=0)                     # (3, H, W)
             target_tensor = torch.from_numpy(target_avg).float()        # (3, H, W) 
 
-        # CROP
+        # CROPbin_edges_tensor = self.bin_edges[scene]
         if self.crop_size:
             if crop_coords is None:
                 i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
@@ -193,7 +193,7 @@ class ImageDataset(Dataset):
                     clean_tensor = torch.flip(clean_tensor, dims=[-2])
 
         return {
-            "input": input_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
+            "input": input_tensor,                                          # (3 or 9, crop_size, crop_size) or (3 or 9, H, W)
             "target": target_tensor,                                        # (3, crop_size, crop_size) or (3, H, W)
             "noisy": noisy_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
             "clean": clean_tensor if clean_tensor is not None else None,    # (3, crop_size, crop_size) or None
@@ -250,6 +250,7 @@ class HistogramDataset(Dataset):
         self.normal_images = {}         # (scene) -> tensor (3, H, W)
         self.scene_paths = {}           # (scene) -> folder path
         self.scene_sample_indices = {}  # (scene) -> (list of input idx, target idx)
+        self.bin_edges = {}             # (scene) -> tensor (bins+1,)
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
             os.makedirs(self.cached_dir)
@@ -325,16 +326,23 @@ class HistogramDataset(Dataset):
             # HISTOGRAM GENERATION
             hist_filename = f"{key}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
             cache_path = os.path.join(self.cached_dir, hist_filename) if self.cached_dir else None
-            if cache_path and os.path.exists(cache_path) or not self.hist_regeneration:
+            if cache_path and os.path.exists(cache_path) and not self.hist_regeneration:
                 cached = np.load(cache_path)
                 self.hist_features[key] = cached['features']        # (H, W, 3, bins)
+                hist = self.hist_features[key]
+                self.bin_edges[key] = cached['bin_edges']
+                bin_edges = self.bin_edges[key]
             else:
                 logger.info(f"Generating Histogram: {hist_filename}")
-                input_samples_raw = spp1_img[input_idx]                                         # (N-1, H, W, 3)
-                hist, _ = generate_histograms(input_samples_raw, self.hist_bins, self.device)   # (H, W, 3, bins)
-                self.hist_features[key] = hist.astype(np.float32)
+                input_samples_raw = spp1_img[input_idx]                                                 # (N-1, H, W, 3)
+                hist, bin_edges = generate_histograms(input_samples_raw, self.hist_bins, self.device)   # (H, W, 3, bins)
+                hist = hist.astype(np.float32)
+                bin_edges = bin_edges.astype(np.float32)
                 if cache_path:
-                    np.savez_compressed(cache_path, features=hist)
+                    np.savez_compressed(cache_path, features=hist, bin_edges=bin_edges)
+
+            self.hist_features[key] = torch.from_numpy(hist).float()
+            self.bin_edges[key] = torch.from_numpy(bin_edges).float()
 
             spp1_array = np.transpose(spp1_img, (0, 3, 1, 2)).astype(np.float32)  # (N, 3, H, W)
             self.spp1_images[key] = spp1_array
@@ -353,14 +361,15 @@ class HistogramDataset(Dataset):
         clean_tensor = self.clean_images.get(scene, None)       # (3, H, W)
         albedo_tensor = self.albedo_images.get(scene, None)     # (3, H, W)
         normal_tensor = self.normal_images.get(scene, None)     # (3, H, W)
+        bin_edges_tensor = self.bin_edges[scene]
 
         input_idx, target_idx = self.scene_sample_indices[scene]
         input_samples = spp1_img[input_idx]                     # (low_spp-N, 3, H, W)
         target_sample = spp1_img[target_idx]                    # (N, 3, H, W)
         
         # Normalise histogram
-        hist_norm = self.hist_features[scene]                   # (H, W, 3, bins)
-        hist_sum = np.sum(hist_norm, axis=-1, keepdims=True)    # (H, W, 3, 1)
+        hist_norm = self.hist_features[scene]                     # (H, W, 3, bins)
+        hist_sum = torch.sum(hist_norm, dim=-1, keepdims=True)    # (H, W, 3, 1)
         hist_norm /= (hist_sum + 1e-8)
 
         # TODO: also concatenate mean and std to histograms ???
@@ -369,8 +378,8 @@ class HistogramDataset(Dataset):
         std = input_samples_tensor.std(dim=0)                           # (3, H, W)
         # input_tensor = torch.cat([hist_torch, mean_t, std_t], dim=1)  # (3, bins+2, H, W)
 
-        # Histogram from numpy to torch, (H, W, 3, bins) --> (3, bins, H, W)
-        hist_torch = torch.from_numpy(hist_norm).permute(2, 3, 0, 1).float()
+        # (H, W, 3, bins) --> (3, bins, H, W)
+        hist_torch = hist_norm.permute(2, 3, 0, 1).float()
         input_tensor = hist_torch.reshape(-1, *hist_torch.shape[2:])            # (3*bins, H, W)
 
         if self.aov:
@@ -413,11 +422,12 @@ class HistogramDataset(Dataset):
                     clean_tensor = torch.flip(clean_tensor, dims=[-2])
 
         return {
-            "input": input_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
+            "input": input_tensor,                                          # (3*bins + 6, crop_size, crop_size) or (3*bins + 6, H, W)
             "target": target_tensor,                                        # (3, crop_size, crop_size) or (3, H, W)
             "noisy": noisy_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
             "clean": clean_tensor if clean_tensor is not None else None,    # (3, crop_size, crop_size) or None
             "scene": scene,
+            "bin_edges": bin_edges_tensor,
             "crop_coords": (i, j, h, w) if self.crop_size else None,              
         }
     
