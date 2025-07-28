@@ -57,9 +57,11 @@ def get_data_loaders(config, run_mode="train"):
     gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
-    if config['standardisation']=='global':
-        # TODO: add support for histogram dataset !!! based on mode
-        full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+    if dataset_cfg['mode']=='img':
+        if config['standardisation']=='global':
+            full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+    elif dataset_cfg['mode']=='hist':
+        full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
     # Split into train/val
     val_ratio = config.get('val_split', 0.1)

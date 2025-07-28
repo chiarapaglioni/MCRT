@@ -367,11 +367,11 @@ class HistogramDataset(Dataset):
         input_samples_tensor = torch.from_numpy(input_samples).float()  # (N-1, 3, H, W)
         mean = input_samples_tensor.mean(dim=0)                         # (3, H, W)
         std = input_samples_tensor.std(dim=0)                           # (3, H, W)
-
-        # Histogram from numpy → torch, (H, W, 3, bins) → (3, bins, H, W)
-        hist_torch = torch.from_numpy(hist_norm).permute(2, 3, 0, 1).float()
         # input_tensor = torch.cat([hist_torch, mean_t, std_t], dim=1)  # (3, bins+2, H, W)
-        input_tensor = hist_torch
+
+        # Histogram from numpy to torch, (H, W, 3, bins) --> (3, bins, H, W)
+        hist_torch = torch.from_numpy(hist_norm).permute(2, 3, 0, 1).float()
+        input_tensor = hist_torch.reshape(-1, *hist_torch.shape[2:])            # (3*bins, H, W)
 
         if self.aov:
             # Concatenate albedo and normal tensors
