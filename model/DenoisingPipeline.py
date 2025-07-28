@@ -58,7 +58,8 @@ def get_data_loaders(config, run_mode="train"):
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if config['standardisation']=='global':
-        full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        # TODO: add support for histogram dataset !!! based on mode
+        full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
     # Split into train/val
     val_ratio = config.get('val_split', 0.1)
@@ -142,7 +143,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         total_loss += loss.item()
 
         # DEBUG (plot the first batch)
-        if debug and batch_idx==0 and epoch>=0:
+        if debug and batch_idx==0 and epoch%25==0:
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)
@@ -222,7 +223,7 @@ def train_model(config):
 
     # LR SCHEDULER
     # reduces learning rate if val loss has not decreased in the last 10 epochs
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
 
     # LOSS FUNCTIONS 
     logger.info(f"Using Tonemap: {dataset_cfg['tonemap'].upper()}")
