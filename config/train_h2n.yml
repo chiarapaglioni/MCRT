@@ -31,7 +31,7 @@ num_workers: 10
 shuffle: true
 pin_memory: false
 standardisation: global
-loss: lhdr                                # 'rmse' or 'lhdr' when output is not tonemapped
+loss: mse                                 # 'rmse' or 'lhdr' when output is not tonemapped
 
 val_split: 0.1                            # 10% validation split
 

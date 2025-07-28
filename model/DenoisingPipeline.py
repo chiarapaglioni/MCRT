@@ -125,7 +125,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         pred = model(tonemapped_input)                      # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
-        if batch_idx % 10 == 0:
+        if batch_idx % 1000 == 0:
             # Only take RGB channels if input has more than 3 channels
             input_rgb = tonemapped_input[:, :3] if tonemapped_input.shape[1] > 3 else tonemapped_input
 
