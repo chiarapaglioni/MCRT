@@ -5,7 +5,8 @@ import tifffile
 import numpy as np
 from torchvision import transforms
 from torch.utils.data import Dataset
-from dataset.HistogramGenerator import generate_histograms
+# Utils
+from utils.utils import load_or_generate_histogram
 
 import logging
 logger = logging.getLogger(__name__)
@@ -164,7 +165,7 @@ class ImageDataset(Dataset):
             target_avg = target_sample.mean(axis=0)                     # (3, H, W)
             target_tensor = torch.from_numpy(target_avg).float()        # (3, H, W) 
 
-        # CROPbin_edges_tensor = self.bin_edges[scene]
+        # CROP
         if self.crop_size:
             if crop_coords is None:
                 i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
@@ -315,34 +316,28 @@ class HistogramDataset(Dataset):
                 normal_img = tifffile.imread(normal_path)                                           # (H, W, 3)
                 self.normal_images[key] = torch.from_numpy(normal_img).permute(2, 0, 1).float()     # (3, H, W)
 
-            # Randomly shuffle indices to pick input and target samples from spp1_img
-            # TODO: less random than ImageDataset because we only select indices randomly per image
-            indices = list(range(self.low_spp))
-            random.shuffle(indices)
-            input_idx = indices[:self.target_split]
-            target_idx = indices[-self.target_split:]
-            self.scene_sample_indices[key] = (input_idx, target_idx)
+            # # Randomly shuffle indices to pick input and target samples from spp1_img
+            # # TODO: less random than ImageDataset because we only select indices randomly per image !!!!
+            # indices = list(range(self.low_spp))
+            # random.shuffle(indices)
+            # input_idx = indices[:self.target_split]
+            # target_idx = indices[-self.target_split:]
+            # self.scene_sample_indices[key] = (input_idx, target_idx)
 
-            # HISTOGRAM GENERATION
-            hist_filename = f"{key}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
-            cache_path = os.path.join(self.cached_dir, hist_filename) if self.cached_dir else None
-            if cache_path and os.path.exists(cache_path) and not self.hist_regeneration:
-                cached = np.load(cache_path)
-                self.hist_features[key] = cached['features']        # (H, W, 3, bins)
-                hist = self.hist_features[key]
-                self.bin_edges[key] = cached['bin_edges']
-                bin_edges = self.bin_edges[key]
-            else:
-                logger.info(f"Generating Histogram: {hist_filename}")
-                input_samples_raw = spp1_img[input_idx]                                                 # (N-1, H, W, 3)
-                hist, bin_edges = generate_histograms(input_samples_raw, self.hist_bins, self.device)   # (H, W, 3, bins)
-                hist = hist.astype(np.float32)
-                bin_edges = bin_edges.astype(np.float32)
-                if cache_path:
-                    np.savez_compressed(cache_path, features=hist, bin_edges=bin_edges)
-
-            self.hist_features[key] = torch.from_numpy(hist).float()
-            self.bin_edges[key] = torch.from_numpy(bin_edges).float()
+            # # HISTOGRAM GENERATION
+            # input_samples_raw = spp1_img[input_idx]
+            # hist_filename = f"{key}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
+            # hist, bin_edges = load_or_generate_histogram(
+            #     key=key,
+            #     spp_samples=input_samples_raw,
+            #     hist_bins=self.hist_bins,
+            #     device=self.device,
+            #     cached_dir=self.cached_dir,
+            #     force_regeneration=self.hist_regeneration,
+            #     hist_filename=hist_filename
+            # )
+            # self.hist_features[key] = torch.from_numpy(hist).float()
+            # self.bin_edges[key] = torch.from_numpy(bin_edges).float()
 
             spp1_array = np.transpose(spp1_img, (0, 3, 1, 2)).astype(np.float32)  # (N, 3, H, W)
             self.spp1_images[key] = spp1_array
@@ -361,9 +356,33 @@ class HistogramDataset(Dataset):
         clean_tensor = self.clean_images.get(scene, None)       # (3, H, W)
         albedo_tensor = self.albedo_images.get(scene, None)     # (3, H, W)
         normal_tensor = self.normal_images.get(scene, None)     # (3, H, W)
+
+        # ----------------------------------------------------- remove after testing -----------------------------------------------------
+        # TODO: less random than ImageDataset because we only select indices randomly per image !!!!
+        indices = list(range(self.low_spp))
+        random.shuffle(indices)
+        input_idx = indices[:self.target_split]
+        target_idx = indices[-self.target_split:]
+
+        # HISTOGRAM GENERATION
+        input_samples_raw = np.transpose(spp1_img[input_idx], (0, 2, 3, 1)) 
+        hist_filename = f"{scene}_spp{self.low_spp}_bins{self.hist_bins}_hist.npz"
+        hist, bin_edges = load_or_generate_histogram(
+            key=scene,
+            spp_samples=input_samples_raw,
+            hist_bins=self.hist_bins,
+            device=self.device,
+            cached_dir=self.cached_dir,
+            force_regeneration=True,
+            hist_filename=hist_filename, 
+            save_hist=False
+        )
+        self.hist_features[scene] = torch.from_numpy(hist).float()
+        self.bin_edges[scene] = torch.from_numpy(bin_edges).float()
+        # ----------------------------------------------------- remove after testing -----------------------------------------------------
         bin_edges_tensor = self.bin_edges[scene]
 
-        input_idx, target_idx = self.scene_sample_indices[scene]
+        # input_idx, target_idx = self.scene_sample_indices[scene]
         input_samples = spp1_img[input_idx]                     # (low_spp-N, 3, H, W)
         target_sample = spp1_img[target_idx]                    # (N, 3, H, W)
         
@@ -509,29 +528,19 @@ class HistogramBinomDataset(Dataset):
 
             self.scene_paths[key] = folder
 
-            # HISTOGRAM CACHING PATHS
-            hist_cache = None
-            if self.cached_dir:
-                hist_cache = os.path.join(self.cached_dir, f"{key}_gen_hist_{self.hist_bins}bins.npz")
-
             # Split spp1 samples into input and target sets
             assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 
-            # INPUT HISTOGRAM
-            if hist_cache and os.path.exists(hist_cache) and not self.hist_regeneration:
-                cached = np.load(hist_cache)
-                hist = cached['features']
-                bin_edges = cached['bin_edges']
-            else:
-                logger.info(f"Computing histogram for scene {key}")
-                hist, bin_edges = generate_histograms(spp1_samples, self.hist_bins, self.device)
-                # input_hist, bin_edges = generate_histograms_with_zero_bin(input_samples, self.hist_bins, self.device)
-                logger.info(f"Generated histogram of shape {hist.shape}")
-                hist = hist.astype(np.float32)
-                bin_edges = bin_edges.astype(np.float32)
-                if hist_cache:
-                    np.savez_compressed(hist_cache, features=hist, bin_edges=bin_edges)
-
+            # HISTOGRAM GENERATION
+            hist, bin_edges = load_or_generate_histogram(
+                key=key,
+                spp_samples=spp1_samples,
+                hist_bins=self.hist_bins,
+                device=self.device,
+                cached_dir=self.cached_dir,
+                force_regeneration=self.hist_regeneration,
+                hist_filename=f"{key}_gen_hist_{self.hist_bins}bins.npz"
+            )
             self.hist_features[key] = torch.from_numpy(hist).float()
             self.bin_edges[key] = torch.from_numpy(bin_edges).float()
 
@@ -551,7 +560,6 @@ class HistogramBinomDataset(Dataset):
 
         # Create binomial distribution with per-bin counts
         binom = torch.distributions.Binomial(total_count=hist, probs=self.p)
-
         # Sample the number of target samples per bin + compute input hist based on that
         target_hist = binom.sample()
         input_hist = hist - target_hist

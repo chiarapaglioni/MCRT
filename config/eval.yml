@@ -2,11 +2,11 @@ eval:
   # idx: 27              # Sample index to evaluate
   n_eval_samples: 10
   hist_checkpoint: results/n2n/2025-07-27_noise2noise_mean_binsimg_ep100_mse_aov.pth
-  img_checkpoint: results/n2n/2025-07-27_noise2noise_mean_binsimg_ep100_mse.pth
+  img_checkpoint: results/n2n/2025-07-28_noise2noise_mean_binsimg_ep300_mse.pth
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
-  in_channels: 3                        # 9 if using AOV else 3
+  in_channels: 9                        # 9 if using AOV else 3
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 4                              # only for GAP model

@@ -128,7 +128,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         pred = model(tonemapped_input)                      # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
-        if batch_idx % 1000 == 0:
+        if batch_idx % 100 == 0:
             # Only take RGB channels if input has more than 3 channels
             input_rgb = tonemapped_input[:, :3] if tonemapped_input.shape[1] > 3 else tonemapped_input
 
@@ -145,7 +145,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         total_loss += loss.item()
 
         # DEBUG (plot the first batch)
-        if debug and batch_idx==0 and epoch%25==0:
+        if debug and batch_idx==0 and epoch%1==0:
             plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)

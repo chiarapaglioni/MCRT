@@ -1,4 +1,5 @@
 import os
+import time
 import math
 import torch
 import logging
@@ -6,6 +7,8 @@ import tifffile
 import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+# Dataset
+from dataset.HistogramGenerator import generate_histograms
 # Models
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
@@ -234,12 +237,51 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     plt.close()
 
 
-def gen_save_hist(data):
+def load_or_generate_histogram(key: str, spp_samples: np.ndarray, hist_bins: int, device: str,
+                                cached_dir: str = None, force_regeneration: bool = False,
+                                hist_filename: str = None, save_hist: bool = False):
     """
-    Generates and saves histogram data to npz files.
+    Load histogram from cache or generate it from SPP samples.
+
+    Args:
+        key: Scene key
+        spp_samples: Array of shape (N, H, W, 3)
+        hist_bins: Number of histogram bins
+        device: Device for computation
+        cached_dir: Directory to load/save cached histograms
+        force_regeneration: Whether to force regenerate even if cache exists
+        hist_filename: Optional custom filename for cache
+        save_hist: whether to save the histogram as .npz
+
+    Returns:
+        hist: np.ndarray of shape (H, W, 3, bins)
+        bin_edges: np.ndarray of shape (bins + 1,)
     """
-    # TODO: move hist generation logic here to avoid repetitions in data loaders
-    print("To be Implemented !!!!")
+    if cached_dir:
+        if hist_filename is None:
+            hist_filename = f"{key}_spp{len(spp_samples)}_bins{hist_bins}_hist.npz"
+        cache_path = os.path.join(cached_dir, hist_filename)
+    else:
+        cache_path = None
+
+    if cache_path and os.path.exists(cache_path) and not force_regeneration:
+        cached = np.load(cache_path)
+        hist = cached['features']
+        bin_edges = cached['bin_edges']
+    else:
+        logger.info(f"Generating Histogram: {hist_filename or key}")
+        start_time = time.time()
+
+        hist, bin_edges = generate_histograms(spp_samples, hist_bins, device)
+        hist = hist.astype(np.float32)
+        bin_edges = bin_edges.astype(np.float32)
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"Histogram generated in {elapsed_time:.2f} seconds")
+        if cache_path and save_hist:
+            np.savez_compressed(cache_path, features=hist, bin_edges=bin_edges)
+
+    return hist, bin_edges
 
 
 def save_tiff(data, file_name):
