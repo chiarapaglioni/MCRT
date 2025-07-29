@@ -14,7 +14,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 # Custom
 from model.UNet import GapUNet
-from dataset.HistImgDataset import HistogramBinomDataset
+from dataset.HistImgDataset import HistogramBinomDataset, CropHistogramBinomDataset
 from utils.utils import load_model, save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot
 
 import logging
@@ -27,7 +27,8 @@ def get_generative_dataloaders(config, device):
     dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
     dataset_cfg['device'] = device  
 
-    full_dataset = HistogramBinomDataset(**dataset_cfg)
+    # full_dataset = HistogramBinomDataset(**dataset_cfg)
+    full_dataset = CropHistogramBinomDataset(**dataset_cfg)
 
     total_len = len(full_dataset)
     val_ratio = config.get('val_split', 0.1)
@@ -198,6 +199,9 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
         input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
         target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
         bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+        # bin_weights = batch['bin_weights'][0].to(device)                # (B, bins+1)
+
+        # logger.info(f"Bin Weights: {bin_weights}")
         
         count_bin0_only_histograms(input_hist, title="Input")
         count_bin0_only_histograms(target_hist, title="Target")
@@ -247,6 +251,7 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
             target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
             clean_img = batch['clean'].to(device)                           # (B, C, H, W)
             bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+            # bin_weights = batch['bin_weights'][1].to(device)                # (B, bins+1)
 
             # Forward pass
             pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
@@ -317,38 +322,32 @@ class CustomCrossEntropyLoss(nn.Module):
         else:
             return ce_loss
         
-# CROSS ENTROPY LOSS FUNCTION
-class EntropyWeightedCrossEntropyLoss(nn.Module):
-    def __init__(self, reduction='mean', entropy_epsilon=1e-6):
+# WEIGHTED ENTROPY LOSS FUNCTION
+class WeightedCrossEntropyLoss(nn.Module):
+    def __init__(self, reduction='mean'):
         super().__init__()
         self.reduction = reduction
-        self.entropy_epsilon = entropy_epsilon
 
-    def forward(self, pred_logits, target_probs):
+    def forward(self, pred_logits, target_probs, bin_weights=None):
         """
-        Args:
-            pred_logits: (N, n_bins)
-            target_probs: (N, n_bins)
+        pred_logits: (N, B) - raw logits
+        target_probs: (N, B) - target histogram probabilities
+        bin_weights: (N, B) or (B,) - optional weights per bin
         """
-        log_probs = F.log_softmax(pred_logits, dim=1)
-        ce_loss = -(target_probs * log_probs).sum(dim=1)  # (N,)
+        log_probs = F.log_softmax(pred_logits, dim=1)  # (N, B)
 
-        # Compute entropy of the target histogram
-        entropy = -(target_probs * torch.log(target_probs + self.entropy_epsilon)).sum(dim=1)  # (N,)
-
-        # Normalize entropy to [0, 1] by dividing by max possible entropy
-        max_entropy = math.log(target_probs.size(1))
-        entropy_norm = entropy / max_entropy
-
-        # Use entropy as a weight: higher entropy → higher weight
-        weighted_loss = ce_loss * entropy_norm.detach()
+        if bin_weights is not None:
+            # Apply weights
+            weighted_ce = -(bin_weights * target_probs * log_probs).sum(dim=1)
+        else:
+            weighted_ce = -(target_probs * log_probs).sum(dim=1)
 
         if self.reduction == 'mean':
-            return weighted_loss.mean()
+            return weighted_ce.mean()
         elif self.reduction == 'sum':
-            return weighted_loss.sum()
+            return weighted_ce.sum()
         else:
-            return weighted_loss
+            return weighted_ce
 
 
 # TRAINING LOOP - DISTRIBUTION
@@ -375,7 +374,7 @@ def train_histogram_generator(config):
 
     # LOSS
     loss_fn = CustomCrossEntropyLoss()
-    # loss_fn = EntropyWeightedCrossEntropyLoss()         # not working well because majority of data is skewed left !
+    # loss_fn = WeightedCrossEntropyLoss()
 
     # OPTIMIZER & LR SCHEDULER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
@@ -391,7 +390,7 @@ def train_histogram_generator(config):
     save_path = Path(config["save_dir"]) / model_name
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Starting training...")
+    logger.info("Starting DISTRIBUTION training...")
 
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
@@ -455,7 +454,7 @@ def train_histogram_residual(config):
     save_path = Path(config["save_dir"]) / model_name
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Starting training...")
+    logger.info("Starting RESIDUAL training...")
 
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
@@ -490,7 +489,8 @@ def run_generative_accumulation_pipeline(config):
     model_cfg = config["model"]
 
     # Dataset
-    dataset = HistogramBinomDataset(**dataset_cfg)
+    # dataset = HistogramBinomDataset(**dataset_cfg)
+    dataset = CropHistogramBinomDataset(**dataset_cfg)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
 
     # Load model
@@ -581,7 +581,8 @@ def iterative_evaluate(config):
     num_samples = config.get("num_samples", 4)
     num_steps = config.get("num_steps", 10)
 
-    dataset = HistogramBinomDataset(**dataset_cfg)
+    # dataset = HistogramBinomDataset(**dataset_cfg)
+    dataset = CropHistogramBinomDataset(**dataset_cfg)
     dataloader = DataLoader(dataset, batch_size=1, num_workers=config['num_workers'], shuffle=False)
 
     model_cfg = config["model"]
@@ -599,52 +600,52 @@ def iterative_evaluate(config):
     model.eval()
 
     os.makedirs("plots", exist_ok=True)
+    with torch.no_grad():
+        for idx, batch in enumerate(dataloader):
+            if idx >= num_samples:
+                break
 
-    for idx, batch in enumerate(dataloader):
-        if idx >= num_samples:
-            break
+            input_hist = batch["input_hist"].to(device)  # shape: (1, C, bins, H, W)
+            clean_img = batch["clean"].to(device)        # shape: (1, 3, H, W)
+            bin_edges = batch["bin_edges"].to(device)    # shape: (1, 3, H, W)
 
-        input_hist = batch["input_hist"].to(device)  # shape: (1, C, bins, H, W)
-        clean_img = batch["clean"].to(device)        # shape: (1, 3, H, W)
-        bin_edges = batch["bin_edges"].to(device)    # shape: (1, 3, H, W)
+            B, C, _, H, W = input_hist.shape
+            accumulated_radiance = torch.zeros((B, C, H, W), device=device)
 
-        B, C, _, H, W = input_hist.shape
-        accumulated_radiance = torch.zeros((B, C, H, W), device=device)
+            _, axs = plt.subplots(1, num_steps + 3, figsize=(4 * (num_steps + 2), 4))
 
-        _, axs = plt.subplots(1, num_steps + 3, figsize=(4 * (num_steps + 2), 4))
+            axs[0].imshow(decode_image_from_probs(input_hist, bin_edges)[0].permute(1, 2, 0).cpu())
+            axs[0].set_title("Original Input Hist")
+            axs[0].axis("off")
 
-        axs[0].imshow(decode_image_from_probs(input_hist, bin_edges)[0].permute(1, 2, 0).cpu())
-        axs[0].set_title("Original Input Hist")
-        axs[0].axis("off")
+            for step in range(1, num_steps+1):
+                logits = model(input_hist)
+                probs = torch.softmax(logits, dim=2)
+                pred_radiance = decode_image_from_probs(probs, bin_edges)
 
-        for step in range(1, num_steps+1):
-            logits = model(input_hist)
-            probs = torch.softmax(logits, dim=2)
-            pred_radiance = decode_image_from_probs(probs, bin_edges)
+                accumulated_radiance += (pred_radiance / num_steps)
 
-            accumulated_radiance += (pred_radiance / num_steps)
+                psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
+                axs[step].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
+                axs[step].set_title(f"Step {step+1}\nPSNR: {psnr:.2f} dB")
+                axs[step].axis("off")
 
-            psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
-            axs[step].imshow(accumulated_radiance[0].permute(1, 2, 0).cpu())
-            axs[step].set_title(f"Step {step+1}\nPSNR: {psnr:.2f} dB")
-            axs[step].axis("off")
+            # Final Output
+            final_psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
+            axs[num_steps + 1].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
+            axs[num_steps + 1].set_title(f"Final Output\nPSNR: {final_psnr:.2f} dB")
+            axs[num_steps + 1].axis("off")
 
-        # Final Output
-        final_psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
-        axs[num_steps + 1].imshow(accumulated_radiance[0].permute(1, 2, 0).cpu())
-        axs[num_steps + 1].set_title(f"Final Output\nPSNR: {final_psnr:.2f} dB")
-        axs[num_steps + 1].axis("off")
+            # Ground Truth
+            axs[num_steps + 2].imshow(clean_img[0].permute(1, 2, 0).detach().cpu().numpy())
+            axs[num_steps + 2].set_title("Ground Truth")
+            axs[num_steps + 2].axis("off")
 
-        # Ground Truth
-        axs[num_steps + 2].imshow(clean_img[0].permute(1, 2, 0).cpu())
-        axs[num_steps + 2].set_title("Ground Truth")
-        axs[num_steps + 2].axis("off")
-
-        plt.tight_layout()
-        plot_path = os.path.join("plots", f"sample_{idx}_evaluation.png")
-        plt.savefig(plot_path)
-        plt.show()
-        print(f"Saved plot to {plot_path}")
+            plt.tight_layout()
+            plot_path = os.path.join("plots", f"sample_{idx}_evaluation.png")
+            plt.savefig(plot_path)
+            plt.show()
+            print(f"Saved plot to {plot_path}")
 
 
 def visualize_predictions(model, dataloader, device, num_samples=5):

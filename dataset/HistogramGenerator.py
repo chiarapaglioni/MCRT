@@ -163,6 +163,7 @@ def generate_histograms(samples, num_bins, device=None, debug=False):
     """
     _, H, W, _ = samples.shape
     min_val, max_val = estimate_range(samples, debug=debug)
+    # logger.info(f"Estimated Range: {min_val} - {max_val} !")
     # TODO: add support for log spaced bins
     bin_edges = np.linspace(min_val, max_val, num_bins + 1)
 
@@ -178,3 +179,34 @@ def generate_histograms(samples, num_bins, device=None, debug=False):
         accumulate_histogram_numba(hist, samples, bin_edges, num_bins)
 
     return hist, bin_edges
+
+
+def generate_hist_statistics(samples, device=None):
+    """
+    Compute mean and variance of radiance per pixel per channel.
+
+    Args:
+        samples (np.ndarray): Shape (N, H, W, 3), input radiance samples
+        device (str or torch.device, optional): Compute device (CPU or CUDA)
+
+    Returns:
+        stats (dict): {
+            'mean': torch.Tensor of shape (H, W, 3),
+            'variance': torch.Tensor of shape (H, W, 3),
+            'std': torch.Tensor of shape (H, W, 3)
+        }
+    """
+    if isinstance(samples, np.ndarray):
+        samples = torch.from_numpy(samples)
+
+    samples = samples.float()  # Ensure float32
+
+    if device is not None:
+        samples = samples.to(device)
+
+    mean = samples.mean(dim=0)                 # (H, W, 3)
+    mean_sq = (samples ** 2).mean(dim=0)       # (H, W, 3)
+    var = mean_sq - mean ** 2                  # (H, W, 3)
+    std = torch.sqrt(var + 1e-8)               # (H, W, 3), safe sqrt
+
+    return {'mean': mean, 'variance': var, 'std': std}

@@ -14,7 +14,7 @@ from datetime import datetime
 # Custom
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
-from dataset.HistImgDataset import HistogramDataset, ImageDataset
+from dataset.HistImgDataset import HistogramDataset, ImageDataset, CropHistogramDataset
 from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
 # Logger
@@ -57,11 +57,12 @@ def get_data_loaders(config, run_mode="train"):
     gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
-    if dataset_cfg['mode']=='img':
+    if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
         if config['standardisation']=='global':
             full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
     elif dataset_cfg['mode']=='hist':
-        full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        # full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
     # Split into train/val
     val_ratio = config.get('val_split', 0.1)
@@ -295,8 +296,11 @@ def evaluate_model(config):
     dataset_cfg = config["dataset"]
     model_cfg = config['model']
 
-    hist_dataset = HistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
+    # TODO: implement smart selection of the datsets
+    # hist_dataset = HistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
+    hist_dataset = CropHistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
     img_dataset = ImageDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
+    # img_dataset = ImageDataset(**{**dataset_cfg, "mode": "stat"}, run_mode="test")
 
     # Randomly select n indices
     total_samples = len(img_dataset)
@@ -306,6 +310,7 @@ def evaluate_model(config):
     # Load models
     hist_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="hist", device=device)
     img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
+    # img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="stat", device=device)
 
     for idx in selected_indices:
         logger.info(f"\nEvaluating index: {idx}")
@@ -372,6 +377,8 @@ def evaluate_model_aov(config):
     aov_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="img", device=device)
     model_cfg["in_channels"] = 3
     img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
+    # model_cfg["in_channels"] = 15
+    # stat_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="stat", device=device)
 
     for idx in selected_indices:
         logger.info(f"\nEvaluating index: {idx}")

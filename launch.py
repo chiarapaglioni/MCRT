@@ -46,13 +46,13 @@ def main():
 
     # GEN-TRAIN (OK) <3
     elif task == "train_gen":
-        # train_histogram_generator(config)                       # Train x dist
-        train_histogram_residual(config)                        # Train x residual
+        train_histogram_generator(config)                       # Train x dist
+        # train_histogram_residual(config)                      # Train x residual
     
     # GEN-EVAL (OK) <3
     elif task == "eval_gen":
-        iterative_evaluate(config)
-        # run_generative_accumulation_pipeline(config)          # GAP
+        # iterative_evaluate(config)
+        run_generative_accumulation_pipeline(config)          # GAP
         # test_histogram_generator(config)                      # noisy vs. pred
 
 if __name__ == "__main__":

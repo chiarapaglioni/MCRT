@@ -7,13 +7,14 @@ dataset:
   hist_bins: 16
   mode: hist                            # Options: 'hist' for hist2hist
   data_augmentation: true
-  virt_size: 100
+  virt_size: 1000
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
   hist_regeneration: true
-  target_sample: 30
+  target_sample: 16
 
 model:
+  model_name: gap
   in_channels: 3
   out_mode: dist                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
@@ -22,13 +23,13 @@ model:
   learning_rate: 1e-4
 
 # General DataLoader settings
-batch_size: 32
+batch_size: 16
 num_workers: 4
 shuffle: true
 pin_memory: false
 
-val_split: 0.2  # 10% validation split
+val_split: 0.1  # 10% validation split
 
 # training
-num_epochs: 50
+num_epochs: 20
 save_dir: checkpoints

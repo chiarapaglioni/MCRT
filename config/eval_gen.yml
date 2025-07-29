@@ -1,10 +1,11 @@
 # Evaluation Parameters
-model_path: checkpoints/20250725_hist2hist_dist_50ep_gpu.pth
+model_path: checkpoints/20250729_hist2hist_dist_20ep.pth
 num_workers: 4
 num_samples: 10       # number of images to test during the evaluate step
 num_steps: 10         # number of iterations to perform during generative accumulation of radiance
 
 model:
+  model_name: gap
   in_channels: 3
   out_mode: dist                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
@@ -24,10 +25,10 @@ dataset:
   virt_size: 100
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
-  target_sample: 30
+  target_sample: 20
   hist_regeneration: false
 
 # General DataLoader settings
-batch_size: 32
+batch_size: 16
 shuffle: true
 pin_memory: false
