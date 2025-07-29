@@ -15,6 +15,7 @@ class SceneRenderer:
 
     def generate_samples_from_scene(self, seed, spp=1):
         """
+        PATH TRACING
         Generate radiance samples from a scene patch using full-image rendering.
 
         Parameters:
