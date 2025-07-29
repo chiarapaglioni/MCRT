@@ -16,5 +16,6 @@ dependencies:
   - torchvision=0.13.0
   - torchsummary
   - openexr
+  - numba
   - pip:
       - mitsuba==3.6.4
