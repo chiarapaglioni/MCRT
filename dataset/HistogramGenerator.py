@@ -1,6 +1,9 @@
 
 import torch
 import numpy as np
+# Histogram Parallelized GPU
+import numba
+from numba import prange
 
 # Logger
 import logging
@@ -78,6 +81,42 @@ def accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins):
         hist[:, :, c, :] = bincounts.reshape(H, W, num_bins)
 
 
+@numba.njit(parallel=True)
+def accumulate_histogram_numba(hist, samples, bin_edges, num_bins):
+    """
+    Numba-accelerated histogram accumulation.
+
+    hist: np.ndarray (H, W, 3, B) zero-initialized array to fill
+    samples: np.ndarray (N, H, W, 3)
+    bin_edges: np.ndarray (B+1,)
+
+    This replaces vectorized calls with explicit parallel loops.
+    """
+    N, H, W, C = samples.shape
+
+    for y in prange(H):
+        for x in range(W):
+            for c in range(C):
+                # Initialize local histogram for this pixel & channel
+                local_hist = np.zeros(num_bins, dtype=np.int32)
+                for n in range(N):
+                    val = samples[n, y, x, c]
+                    # Find bin index via binary search on bin_edges
+                    # Since bin_edges is sorted, use simple linear or binary search
+                    # For small num_bins, linear search is fine
+                    bin_idx = 0
+                    for b in range(num_bins):
+                        if val >= bin_edges[b] and val < bin_edges[b + 1]:
+                            bin_idx = b
+                            break
+                        # Handle edge case val == max(bin_edges)
+                        if val == bin_edges[-1]:
+                            bin_idx = num_bins - 1
+                    local_hist[bin_idx] += 1
+                for b in range(num_bins):
+                    hist[y, x, c, b] = local_hist[b]
+
+
 def accumulate_histogram_torch(samples, bin_edges, num_bins, device='cuda'):
     """
     samples: Tensor shape (N, H, W, 3), float32
@@ -124,6 +163,7 @@ def generate_histograms(samples, num_bins, device=None, debug=False):
     """
     _, H, W, _ = samples.shape
     min_val, max_val = estimate_range(samples, debug=debug)
+    # TODO: add support for log spaced bins
     bin_edges = np.linspace(min_val, max_val, num_bins + 1)
 
     if device is not None and torch.cuda.is_available():
@@ -134,6 +174,7 @@ def generate_histograms(samples, num_bins, device=None, debug=False):
             hist = hist_torch.cpu().numpy()
     else:
         hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
-        accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins)
+        # accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins)
+        accumulate_histogram_numba(hist, samples, bin_edges, num_bins)
 
     return hist, bin_edges
