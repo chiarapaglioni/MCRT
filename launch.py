@@ -5,7 +5,7 @@ from utils.utils import setup_logger
 
 from renderer.RenderingPipeline import generate_data
 from dataset.HistogramLoader import test_data_loader
-from model.DenoisingPipeline import train_model, evaluate_model, evaluate_model_aov
+from model.DenoisingPipeline import train_model, evaluate_model, evaluate_model_aov, benchmark_num_workers
 from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline, test_histogram_generator, train_histogram_residual
 
 logger = setup_logger()
@@ -17,7 +17,7 @@ def load_config(path):
 def main():
     # PARSE CONFIG
     parser = argparse.ArgumentParser(description="MCRT Pipeline Launcher")
-    parser.add_argument("task", type=str, choices=["data_gen", "data_loader", "train", "eval", "train_gen", "eval_gen"], help="Task to run.")
+    parser.add_argument("task", type=str, choices=["data_gen", "data_loader", "train", "eval", "train_gen", "eval_gen", "test_workers"], help="Task to run.")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     args = parser.parse_args()
 
@@ -52,8 +52,12 @@ def main():
     # GEN-EVAL (OK) <3
     elif task == "eval_gen":
         # iterative_evaluate(config)
-        run_generative_accumulation_pipeline(config)          # GAP
+        run_generative_accumulation_pipeline(config)            # GAP
         # test_histogram_generator(config)                      # noisy vs. pred
+
+    # GPU TEST (OK) <3
+    elif task == "test_workers":
+        benchmark_num_workers(config)
 
 if __name__ == "__main__":
     main()

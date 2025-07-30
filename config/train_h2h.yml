@@ -7,18 +7,18 @@ dataset:
   hist_bins: 16
   mode: hist                            # Options: 'hist' for hist2hist
   data_augmentation: true
-  virt_size: 1000
+  virt_size: 3000
   clean: true                           # Whether to include 'clean' targets if available
   debug: false
-  hist_regeneration: true
+  hist_regeneration: false
   target_sample: 16
 
 model:
   model_name: gap
-  in_channels: 3
+  in_channels: 3                        
   out_mode: dist                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
-  depth: 3
+  depth: 5                              # number of encoder/decoder blocks
   start_filters: 32
   learning_rate: 1e-4
 
@@ -31,5 +31,5 @@ pin_memory: false
 val_split: 0.1  # 10% validation split
 
 # training
-num_epochs: 20
+num_epochs: 100
 save_dir: checkpoints

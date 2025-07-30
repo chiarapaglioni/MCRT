@@ -14,7 +14,7 @@ from datetime import datetime
 # Custom
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
-from dataset.HistImgDataset import HistogramDataset, ImageDataset, CropHistogramDataset
+from dataset.HistImgDataset import ImageDataset, CropHistogramDataset
 from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
 # Logger
@@ -119,7 +119,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
-        hdr_input = batch['input'].to(device)               # B, 3, H, W or # B, 9, H, W 
+        hdr_input = batch['input'].to(device)               # B, 3, H, W (img) or # B, 9, H, W (aov) or # B, 15, H, W (aov + stat)
         hdr_target = batch['target'].to(device)             # B, 3, H, W
 
         optimizer.zero_grad()
@@ -417,3 +417,32 @@ def evaluate_model_aov(config):
             save_path=f'plots/denoised_{idx}.png',
             correct=True        # whether to plot tonemapped + gamma corrected images
         )
+
+
+def benchmark_num_workers(config, batch_size=32, max_workers=8):
+    """
+    Test the speed of different num_works on GPU/CPU to find the optimal number
+    """
+    dataset_cfg = config['dataset'].copy()
+    dataset_cfg['root_dir'] = Path(__file__).resolve().parents[1] / dataset_cfg['root_dir']
+
+    gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
+    logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
+
+    if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
+        if config['standardisation']=='global':
+            full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
+    elif dataset_cfg['mode']=='hist':
+        # full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
+        full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
+
+    logger.info(f"Total dataset size: {len(full_dataset)}")
+
+    for workers in range(0, max_workers + 1, 2):
+        loader = DataLoader(full_dataset, batch_size=batch_size, num_workers=workers, pin_memory=True)
+        start = time.time()
+        for i, batch in enumerate(loader):
+            if i >= 50:  # test first 50 batches
+                break
+        duration = time.time() - start
+        print(f'num_workers={workers} took {duration:.2f} seconds for 50 batches')

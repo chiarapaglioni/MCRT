@@ -7,8 +7,6 @@ import tifffile
 import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-# Dataset
-from dataset.HistogramGenerator import generate_histograms
 # Models
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
@@ -191,9 +189,9 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     B, _, H, W = input_imgs.shape
 
     # Handle img and hist data
-    if input_imgs.shape[1] == 9:
+    if input_imgs.shape[1] <= 15:
         input_img = input_imgs[idx][:3]
-    elif input_imgs.shape[1] > 9 and bin_edges is not None:
+    elif input_imgs.shape[1] > 15 and bin_edges is not None:
         bins = bin_edges.shape[1] - 1
         hist_size = bins * 3
         hist_decoded = input_imgs[:, :hist_size]                # (B, bins*3, H, W)
@@ -235,54 +233,6 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     filename = os.path.join(save_dir, f"epoch_{epoch:03d}_batch_{batch_idx:03d}.png")
     plt.savefig(filename, bbox_inches='tight')
     plt.close()
-
-
-def load_or_generate_histogram(key: str, spp_samples: np.ndarray, hist_bins: int, device: str,
-                                cached_dir: str = None, force_regeneration: bool = False,
-                                hist_filename: str = None, save_hist: bool = False):
-    """
-    Load histogram from cache or generate it from SPP samples.
-
-    Args:
-        key: Scene key
-        spp_samples: Array of shape (N, H, W, 3)
-        hist_bins: Number of histogram bins
-        device: Device for computation
-        cached_dir: Directory to load/save cached histograms
-        force_regeneration: Whether to force regenerate even if cache exists
-        hist_filename: Optional custom filename for cache
-        save_hist: whether to save the histogram as .npz
-
-    Returns:
-        hist: np.ndarray of shape (H, W, 3, bins)
-        bin_edges: np.ndarray of shape (bins + 1,)
-    """
-    if cached_dir:
-        if hist_filename is None:
-            hist_filename = f"{key}_spp{len(spp_samples)}_bins{hist_bins}_hist.npz"
-        cache_path = os.path.join(cached_dir, hist_filename)
-    else:
-        cache_path = None
-
-    if cache_path and os.path.exists(cache_path) and not force_regeneration:
-        cached = np.load(cache_path)
-        hist = cached['features']
-        bin_edges = cached['bin_edges']
-    else:
-        logger.info(f"Generating Histogram: {hist_filename or key}")
-        start_time = time.time()
-
-        hist, bin_edges = generate_histograms(spp_samples, hist_bins, device)
-        hist = hist.astype(np.float32)
-        bin_edges = bin_edges.astype(np.float32)
-
-        elapsed_time = time.time() - start_time
-        logger.info(f"Histogram generated in {elapsed_time:.2f} seconds")
-        if cache_path and save_hist:
-            np.savez_compressed(cache_path, features=hist, bin_edges=bin_edges)
-
-    return hist, bin_edges
-
 
 def save_tiff(data, file_name):
     """
@@ -444,7 +394,6 @@ def compute_global_mean_std(root_dir):
     mean = sum_ / count
     var = (sum_sq_ / count) - mean**2
     std = torch.sqrt(var + 1e-8)
-
     return mean.view(3, 1, 1), std.view(3, 1, 1)
 
 

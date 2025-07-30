@@ -27,7 +27,7 @@ model:
 
 # General DataLoader settings
 batch_size: 16
-num_workers: 10
+num_workers: 8                            # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global

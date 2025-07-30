@@ -24,8 +24,8 @@ class N2Net(nn.Module):
         self.in_channels = in_channels
 
         # ---- Dynamic base width ----
-        self.base_width = 48 if in_channels <= 9 else int(in_channels * 1.5)
-        final_bw = 64 if in_channels <= 9 else int(in_channels * 2)
+        self.base_width = 48 if in_channels <= 15 else int(in_channels * 1.5)
+        final_bw = 64 if in_channels <= 15 else int(in_channels * 2)
         bw = self.base_width  # base feature size
         bw2 = bw * 2  # used in decoder
 

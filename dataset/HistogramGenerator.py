@@ -34,53 +34,6 @@ def estimate_range(samples, debug=False):
     return min_val, max_val
 
 
-def accumulate_histogram(hist, samples, bin_edges, num_bins):
-    """
-    Vectorized histogram accumulation.
-
-    samples: (N, H, W, 3)
-    hist: (H, W, 3, B)
-    """
-    _, H, W, C = samples.shape
-    bins = np.searchsorted(bin_edges, samples, side='right') - 1
-    bins = np.clip(bins, 0, num_bins - 1)
-
-    for c in range(C):
-        bincounts = np.zeros((H, W, num_bins), dtype=np.int32)
-        for b in range(num_bins):
-            bincounts[:, :, b] = (bins[:, :, :, c] == b).sum(axis=0)
-        hist[:, :, c, :] = bincounts  # replace not add to avoid accumulation
-
-
-def accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins):
-    """
-    Vectorized histogram accumulation without explicit loops.
-
-    Paramters:
-        hist (np.ndarray): (H, W, 3, B) zero-initialized histogram to fill.
-        samples (np.ndarray): (N, H, W, 3) samples.
-        bin_edges (np.ndarray): (B+1,) bin edges.
-        num_bins (int): number of bins.
-    """
-    # samples: (N, H, W, 3)
-    # Transpose samples to (H, W, 3, N) for easier manipulation
-    samples_t = np.transpose(samples, (1, 2, 3, 0))
-    
-    # Digitize samples to bin indices (shape: H, W, 3, N)
-    bins = np.digitize(samples_t, bin_edges) - 1
-    bins = np.clip(bins, 0, num_bins - 1)
-    
-    H, W, C, N = bins.shape
-    
-    for c in range(C):
-        # Flatten spatial dims and N: shape (H*W, N)
-        flat_bins = bins[:, :, c, :].reshape(-1, N)
-        # Count occurrences of each bin along axis 1
-        bincounts = np.apply_along_axis(lambda x: np.bincount(x, minlength=num_bins), axis=1, arr=flat_bins)
-        # Reshape back to (H, W, B)
-        hist[:, :, c, :] = bincounts.reshape(H, W, num_bins)
-
-
 @numba.njit(parallel=True)
 def accumulate_histogram_numba(hist, samples, bin_edges, num_bins):
     """
@@ -117,33 +70,40 @@ def accumulate_histogram_numba(hist, samples, bin_edges, num_bins):
                     hist[y, x, c, b] = local_hist[b]
 
 
-def accumulate_histogram_torch(samples, bin_edges, num_bins, device='cuda'):
+def accumulate_histogram_gpu(samples, bin_edges, num_bins):
     """
-    samples: Tensor shape (N, H, W, 3), float32
-    Returns: hist Tensor (H, W, 3, num_bins)
+    samples: (N, H, W, 3) float32
+    bin_edges: (B+1,) float32
+    Returns:
+        hist: (H, W, 3, B) int32
     """
-    samples = samples.to(device)
-
-    # Fix the bin_edges warning
-    if not isinstance(bin_edges, torch.Tensor):
-        bin_edges = torch.tensor(bin_edges, dtype=torch.float32, device=device)
-    else:
-        bin_edges = bin_edges.to(device=device, dtype=torch.float32)
-
+    device = samples.device
     N, H, W, C = samples.shape
-    hist = torch.zeros((H, W, C, num_bins), device=device, dtype=torch.int32)
+    B = num_bins
 
-    bins = torch.bucketize(samples, bin_edges) - 1
-    bins = torch.clamp(bins, 0, num_bins - 1)
+    # Bucketize samples to bin indices
+    bin_ids = torch.bucketize(samples, bin_edges) - 1               # (N, H, W, C)
+    bin_ids = torch.clamp(bin_ids, 0, B - 1)
 
-    for c in range(C):
-        flat_bins = bins[:, :, :, c].reshape(N, -1)
-        for idx in range(flat_bins.shape[1]):
-            hist.view(H*W, C, num_bins)[idx, c].index_add_(
-                0,
-                flat_bins[:, idx],
-                torch.ones(N, device=device, dtype=torch.int32)
-            )
+    # Prepare histogram tensor
+    hist = torch.zeros((H, W, C, B), dtype=torch.int32, device=device)
+
+    # Prepare indices
+    h_idx = torch.arange(H, device=device).view(1, H, 1, 1).expand(N, H, W, C)
+    w_idx = torch.arange(W, device=device).view(1, 1, W, 1).expand(N, H, W, C)
+    c_idx = torch.arange(C, device=device).view(1, 1, 1, C).expand(N, H, W, C)
+    b_idx = bin_ids  # already shape (N, H, W, C)
+
+    # Flatten all index tensors
+    h_idx = h_idx.reshape(-1)
+    w_idx = w_idx.reshape(-1)
+    c_idx = c_idx.reshape(-1)
+    b_idx = b_idx.reshape(-1)
+
+    # Flatten values to add (1 per sample)
+    values = torch.ones_like(b_idx, dtype=torch.int32)
+    # Accumulate into histogram
+    hist.index_put_((h_idx, w_idx, c_idx, b_idx), values, accumulate=True)
     return hist
 
 
@@ -153,31 +113,50 @@ def generate_histograms(samples, num_bins, device=None, debug=False):
     Uses GPU acceleration via PyTorch if CUDA is available.
     
     Args:
-        samples (np.ndarray): Shape (N, H, W, 3), input radiance samples
+        samples (np.array): Shape (N, H, W, 3), input radiance samples
         num_bins (int): Number of histogram bins
         debug (bool): Print debug info
     
     Returns:
-        hist (np.ndarray): Shape (H, W, 3, B), histogram per pixel per channel
-        bin_edges (np.ndarray): Shape (B+1,), bin edges
+        hist (torch.Tensor): Shape (H, W, 3, B), histogram per pixel per channel
+        bin_edges (torch.Tensor): Shape (B+1,), bin edges
     """
     _, H, W, _ = samples.shape
     min_val, max_val = estimate_range(samples, debug=debug)
     # logger.info(f"Estimated Range: {min_val} - {max_val} !")
     # TODO: add support for log spaced bins
     bin_edges = np.linspace(min_val, max_val, num_bins + 1)
+    hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
 
-    if device is not None and torch.cuda.is_available():
-        with torch.no_grad():
-            torch_samples = torch.tensor(samples, dtype=torch.float32, device=device)
-            bin_edges_torch = torch.tensor(bin_edges, dtype=torch.float32, device=device)
-            hist_torch = accumulate_histogram_torch(torch_samples, bin_edges_torch, num_bins, device=device)
-            hist = hist_torch.cpu().numpy()
-    else:
-        hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
-        # accumulate_histogram_vectorized(hist, samples, bin_edges, num_bins)
-        accumulate_histogram_numba(hist, samples, bin_edges, num_bins)
+    samples = samples.transpose(0, 2, 3, 1) 
+    accumulate_histogram_numba(hist, samples, bin_edges, num_bins)
+    hist = torch.from_numpy(hist).float()
+    bin_edges = torch.from_numpy(bin_edges).float() 
+    return hist, bin_edges
 
+
+def generate_histograms_torch(samples, num_bins, device=None, debug=False):
+    """
+    Generate histograms per pixel per channel from input samples.
+    Uses GPU acceleration via PyTorch if CUDA is available.
+    
+    Args:
+        samples (torch.Tensor): Shape (N, H, W, 3), input radiance samples
+        num_bins (int): Number of histogram bins
+        debug (bool): Print debug info
+    
+    Returns:
+        hist (torch.Tensor): Shape (H, W, 3, B), histogram per pixel per channel
+        bin_edges (torch.Tensor): Shape (B+1,), bin edges
+    """
+    _, H, W, _ = samples.shape
+    min_val, max_val = estimate_range(samples, debug=debug)
+    # logger.info(f"Estimated Range: {min_val} - {max_val} !")
+    # TODO: add support for log spaced bins
+    bin_edges = torch.linspace(min_val, max_val, num_bins + 1)
+
+    samples = samples.permute(0, 2, 3, 1).contiguous()
+    hist = accumulate_histogram_gpu(samples, bin_edges, num_bins)
     return hist, bin_edges
 
 
@@ -186,27 +165,18 @@ def generate_hist_statistics(samples, device=None):
     Compute mean and variance of radiance per pixel per channel.
 
     Args:
-        samples (np.ndarray): Shape (N, H, W, 3), input radiance samples
+        samples (torch.Tesor): Shape (N, H, W, 3), input radiance samples
         device (str or torch.device, optional): Compute device (CPU or CUDA)
 
     Returns:
         stats (dict): {
             'mean': torch.Tensor of shape (H, W, 3),
             'variance': torch.Tensor of shape (H, W, 3),
-            'std': torch.Tensor of shape (H, W, 3)
+            'std': torch.Tensor of shape (H, W, 3)       -------> currently usused becauses it was generating NaN in square root
         }
     """
-    if isinstance(samples, np.ndarray):
-        samples = torch.from_numpy(samples)
-
-    samples = samples.float()  # Ensure float32
-
-    if device is not None:
-        samples = samples.to(device)
-
     mean = samples.mean(dim=0)                 # (H, W, 3)
     mean_sq = (samples ** 2).mean(dim=0)       # (H, W, 3)
     var = mean_sq - mean ** 2                  # (H, W, 3)
     std = torch.sqrt(var + 1e-8)               # (H, W, 3), safe sqrt
-
     return {'mean': mean, 'variance': var, 'std': std}
