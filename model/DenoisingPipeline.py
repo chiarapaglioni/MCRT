@@ -37,7 +37,7 @@ class LHDRLoss(nn.Module):
 
     def forward(self, denoised, target):
         """Computes loss by unpacking render buffer."""
-        loss = ((denoised - target) ** 2) / ((denoised + self.epsilon)**2)
+        loss = ((denoised - target) ** 2) / (denoised + self.epsilon)**2
         return torch.mean(loss.view(-1))
 
 
@@ -121,6 +121,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     for batch_idx, batch in enumerate(dataloader):
         hdr_input = batch['input'].to(device)               # B, 3, H, W (img) or # B, 9, H, W (aov) or # B, 15, H, W (aov + stat)
         hdr_target = batch['target'].to(device)             # B, 3, H, W
+        crop_mean = batch['mean'].to(device)
 
         optimizer.zero_grad()
 
@@ -164,6 +165,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             hdr_input = batch['input'].to(device)           # B, 3, H, W
             hdr_target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)               # B, 3, H, W
+            crop_mean = batch['mean'].to(device)
 
             # Apply tonemapping to input if tonemap != none
             tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
@@ -173,11 +175,11 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
-                pred_i = pred[i]
-                clean_i = clean[i]
-                
-                # PSNR in HDR space
-                total_psnr += compute_psnr(pred_i, clean_i)
+                mean_i = crop_mean[i]  # scalar
+                pred_i_hdr = pred[i] * mean_i.view(-1, 1, 1)
+                clean_i_hdr = clean[i] * mean_i.view(-1, 1, 1)
+
+                total_psnr += compute_psnr(pred_i_hdr, clean_i_hdr)
                 count += 1
 
     avg_loss = total_loss / len(dataloader)

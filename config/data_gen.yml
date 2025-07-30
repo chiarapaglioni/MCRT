@@ -7,7 +7,7 @@ width: 512                  # Image width (only used indirectly via sensor / sce
 height: 512                 # Image height
 
 log_bin: false              # Binning strategy (not currently used in this script)
-debug: false                # Debug mode (used in SceneRenderer)
+debug: true                # Debug mode (used in SceneRenderer)
 
 input_path: "data"          # Path containing scene folders or zips
 output_path: "output"       # Where rendered outputs will be saved

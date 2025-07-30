@@ -187,7 +187,7 @@ def generate_data(config):
         # render all xml files of a scene
         for xml_file in xml_files:
             # RENDERER
-            renderer = SceneRenderer(xml_file, debug=False)
+            renderer = SceneRenderer(xml_file, debug=config["debug"])
 
             # render_scene(renderer, xml_file, output_dir, mi_variant=config["mi_variant"], low_spp=config['low_spp'], high_spp=config['high_spp'])
             render_albedo_and_normal(renderer, xml_file, output_dir)

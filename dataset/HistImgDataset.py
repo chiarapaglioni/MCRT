@@ -5,6 +5,7 @@ import tifffile
 from torchvision import transforms
 from torch.utils.data import Dataset
 # Utils
+from utils.utils import apply_tonemap
 from dataset.HistogramGenerator import generate_histograms, generate_histograms_torch, generate_hist_statistics
 
 import logging
@@ -39,7 +40,8 @@ class ImageDataset(Dataset):
         self.run_mode = run_mode
 
         # mean/std for normalisation
-        # TODO: try normalising by only dividing by the mean per image
+        # TODO: try normalising by only dividing by the mean per image 
+        # DONE but global mean and var don't give improvements since the images are very different from one another
         self.image_mean_std = {}  # (scene) -> (mean, std)
         self.global_mean = global_mean
         self.global_std = global_std
@@ -117,11 +119,17 @@ class ImageDataset(Dataset):
                 # ALBEDO
                 albedo_path = os.path.join(folder, albedo_file)
                 albedo_img = tifffile.imread(albedo_path)                                           # (H, W, 3)
-                self.albedo_images[key] = torch.from_numpy(albedo_img).permute(2, 0, 1).float()     # (3, H, W)
+                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()     # (3, H, W)
+                albedo_min = albedo_tensor.amin(dim=(0,1), keepdim=True)
+                albedo_max = albedo_tensor.amax(dim=(0,1), keepdim=True)
+                albedo_tensor = (albedo_tensor - albedo_min) / (albedo_max - albedo_min + 1e-6)
+                self.albedo_images[key] = albedo_tensor
                 # NORMAL
                 normal_path = os.path.join(folder, normal_file)
                 normal_img = tifffile.imread(normal_path)                                           # (H, W, 3)
-                self.normal_images[key] = torch.from_numpy(normal_img).permute(2, 0, 1).float()     # (3, H, W)
+                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()     # (3, H, W)
+                normal_tensor = (normal_tensor + 1.0) * 0.5
+                self.normal_images[key] = normal_tensor
 
     def __len__(self):
         return self.virt_size
@@ -156,10 +164,6 @@ class ImageDataset(Dataset):
                 input_tensor, stats['variance'] #, stats['std']
             ], dim=0)  # Shape (6, H, W)
 
-        # AOV
-        if self.aov:
-            input_tensor = torch.cat([input_tensor, albedo_tensor, normal_tensor], dim=0)       # stat: (6 + 6, H, W) img: (3 + 6, H, W)
-
         # TARGET
         if self.supervised:
             target_tensor = clean_tensor   
@@ -177,6 +181,30 @@ class ImageDataset(Dataset):
             noisy_tensor = noisy_tensor[..., i:i+h, j:j+w]
             if clean_tensor is not None:
                 clean_tensor = clean_tensor[..., i:i+h, j:j+w]
+            if albedo_tensor is not None:
+                albedo_tensor = albedo_tensor[..., i:i+h, j:j+w]
+            if normal_tensor is not None:
+                normal_tensor = normal_tensor[..., i:i+h, j:j+w]
+
+        # NORMALISE BY MEAN PER CROP (after cropping)
+        crop_mean = input_tensor.mean(dim=(1,2), keepdim=True) + 1e-6  # avoid divide by zero
+        input_tensor = input_tensor / crop_mean
+        target_tensor = target_tensor / crop_mean
+        noisy_tensor = noisy_tensor / crop_mean
+        if clean_tensor is not None:
+            clean_tensor = clean_tensor / crop_mean
+
+        # AOV
+        if self.aov:
+            # NORMALISE
+            # Normals are in [-1,1], convert to [0,1] for visualization/storage
+            normal_tensor = (normal_tensor + 1.0) * 0.5
+            # Albedo is in HDR due to noisy Mitsuba measurments so convert to [0, 1]
+            # albedo_min = albedo_tensor.amin(dim=(0,1), keepdim=True)
+            # albedo_max = albedo_tensor.amax(dim=(0,1), keepdim=True)
+            # albedo_tensor = (albedo_tensor - albedo_min) / (albedo_max - albedo_min + 1e-6)
+            # input_tensor = apply_tonemap(input_tensor, tonemap="reinhard_gamma") 
+            input_tensor = torch.cat([input_tensor, albedo_tensor, normal_tensor], dim=0)       # stat: (6 + 6, H, W) img: (3 + 6, H, W)
 
         # DATA AUGMENTATION: random horizontal/vertical flips
         if self.data_augmentation:
@@ -200,6 +228,7 @@ class ImageDataset(Dataset):
             "noisy": noisy_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
             "clean": clean_tensor if clean_tensor is not None else None,    # (3, crop_size, crop_size) or None
             "scene": scene,
+            "mean": crop_mean,
             "crop_coords": (i, j, h, w) if self.crop_size else None,              
         }
 

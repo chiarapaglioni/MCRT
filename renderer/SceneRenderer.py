@@ -141,11 +141,12 @@ class SceneRenderer:
         })
 
         albedo_image = mi.render(scene, sensor=sensor, integrator=integrator)
+        albedo_np = np.array(albedo_image)
 
         if self.debug:
-            print("Albedo Image shape:", albedo_image.shape)
-
-        return np.array(albedo_image)
+            print("Albedo Image shape:", albedo_np.shape)
+            print(f"Albedo Min {albedo_np.min()} - Max {albedo_np.max()}")
+        return albedo_np
 
     def render_normal_image(self):
         """
@@ -187,11 +188,9 @@ class SceneRenderer:
         })
 
         normal_image = mi.render(scene, sensor=sensor, integrator=integrator)
+        normal_np = np.array(normal_image)
 
         if self.debug:
-            print("Normal Image shape:", normal_image.shape)
-
-        # Normals are in [-1,1], convert to [0,1] for visualization/storage
-        normal_image = (np.array(normal_image) + 1.0) * 0.5
-
-        return normal_image
+            print("Normal Image shape:", normal_np.shape)
+            print(f"Normal Min {normal_np.min()} - Max {normal_np.max()}")
+        return normal_np

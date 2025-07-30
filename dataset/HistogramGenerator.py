@@ -155,7 +155,7 @@ def generate_histograms_torch(samples, num_bins, device=None, debug=False):
     # TODO: add support for log spaced bins
     bin_edges = torch.linspace(min_val, max_val, num_bins + 1)
 
-    samples = samples.permute(0, 2, 3, 1).contiguous()
+    # samples = samples.permute(0, 2, 3, 1).contiguous()
     hist = accumulate_histogram_gpu(samples, bin_edges, num_bins)
     return hist, bin_edges
 
