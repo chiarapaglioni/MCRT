@@ -527,10 +527,11 @@ def local_variance(image, window_size=16, save_path=None, cmap='viridis'):
         Tensor: Variance heatmap of shape (H_patch, W_patch).
     """
     luminance = image.mean(dim=0, keepdim=True)  # (1, H, W)
-    mean = F.avg_pool2d(luminance, window_size, stride=1, padding=window_size // 2)
-    mean_sq = F.avg_pool2d(luminance ** 2, window_size, stride=1, padding=window_size // 2)
+    padding = (window_size - 1) // 2
+    mean = F.avg_pool2d(luminance, kernel_size=window_size, stride=1, padding=padding)
+    mean_sq = F.avg_pool2d(luminance ** 2, kernel_size=window_size, stride=1, padding=padding)
     var = mean_sq - mean ** 2  # (1, H, W)
-    var = var.squeeze(0)  # (H_patch, W_patch)
+    var = var.squeeze(0)  # (H, W)
 
     if save_path is not None:
         var_norm = (var - var.min()) / (var.max() - var.min() + 1e-8)
@@ -544,3 +545,21 @@ def local_variance(image, window_size=16, save_path=None, cmap='viridis'):
         plt.close()
 
     return var
+
+def sample_crop_coords_from_variance(varmap, crop_size):
+    H, W = varmap.shape
+    crop_H, crop_W = crop_size, crop_size
+
+    var_tensor = varmap.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+    crop_var = F.avg_pool2d(var_tensor, kernel_size=(crop_H, crop_W), stride=1).squeeze(0).squeeze(0)  # (H-crop+1, W-crop+1)
+    
+    probs = crop_var.flatten()
+    probs -= probs.min()
+    probs /= probs.sum() + 1e-8
+
+    idx = torch.multinomial(probs, 1).item()
+    out_W = crop_var.shape[1]
+    i = idx // out_W
+    j = idx % out_W
+
+    return int(i), int(j), crop_H, crop_W

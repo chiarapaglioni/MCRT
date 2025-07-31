@@ -93,6 +93,7 @@ def get_data_loaders(config, run_mode="train"):
     logger.info(f"Training set size:  {len(train_ds)}")
     logger.info(f"Validation set size: {len(val_ds)}")
 
+    # shuffle = True to shuffle patches at each epoch
     train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True,  num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=True)
     val_loader   = DataLoader(val_ds,   batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'], pin_memory=config['pin_memory'], drop_last=False)
 
