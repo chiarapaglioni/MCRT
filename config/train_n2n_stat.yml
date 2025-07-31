@@ -7,7 +7,7 @@ dataset:
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
-  mode: img                               # 'hist' for hist2noise or 'img' or 'stat' for noise2noise
+  mode: stat                              # 'hist' for hist2noise or 'img' or 'stat' for noise2noise
   data_augmentation: true                 # horizontal and vertical flips
   clean: true                             # Whether to include 'clean' targets if available
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
@@ -18,7 +18,7 @@ dataset:
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
-  in_channels: 9                        # 3 (img) or 9 (img + aov) or 10 (stat + aov)
+  in_channels: 10                       # 3 (img) or 9 (img + aov) or 10 (stat + aov)
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 4                              # only for GAP model

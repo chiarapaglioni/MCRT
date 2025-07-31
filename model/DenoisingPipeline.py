@@ -76,10 +76,8 @@ def get_data_loaders(config, run_mode="train"):
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
-        if config['standardisation']=='global':
-            full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
     elif dataset_cfg['mode']=='hist':
-        # full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
         full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
     # Split into train/val
@@ -104,7 +102,6 @@ def get_data_loaders(config, run_mode="train"):
     logger.info(f"Noisy shape:  {sample['noisy'].shape}")
     if 'clean' in sample and sample['clean'] is not None:
         logger.info(f"Clean shape:  {sample['clean'].shape}")
-
     return train_loader, val_loader
 
 
@@ -121,8 +118,7 @@ def get_sample(dataset, idx=0, device='cpu'):
 
 def evaluate_sample(model, input_tensor, clean_tensor):
     with torch.no_grad():
-        tonemapped_input = input_tensor # apply_tonemap(input_tensor, "reinhard_gamma")
-        pred = model(tonemapped_input)
+        pred = model(input_tensor)
         clean = clean_tensor
 
         logger.info(f"Target shape: {clean.shape}")      # H, W, 3
@@ -138,13 +134,12 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
-        # TODO: try applying tone mapping over the whole input
-        hdr_input = batch['input'].to(device)               # B, 3, H, W (img) or # B, 9, H, W (aov) or # B, 15, H, W (aov + stat)
+        hdr_input = batch['input'].to(device)               # B, 3, H, W (img) or # B, 9, H, W (aov) or # B, 10, H, W (aov + stat)
         hdr_target = batch['target'].to(device)             # B, 3, H, W
 
         optimizer.zero_grad()
 
-        pred = model(hdr_input)                      # B, 3, H, W (HDR space)
+        pred = model(hdr_input)                             # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
         if batch_idx % 50 == 0:
@@ -315,7 +310,6 @@ def evaluate_model(config):
     model_cfg = config['model']
 
     # TODO: implement smart selection of the datsets
-    # hist_dataset = HistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
     hist_dataset = CropHistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
     img_dataset = ImageDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
     # img_dataset = ImageDataset(**{**dataset_cfg, "mode": "stat"}, run_mode="test")
@@ -395,7 +389,7 @@ def evaluate_model_aov(config):
     aov_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="img", device=device)
     model_cfg["in_channels"] = 3
     img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
-    # model_cfg["in_channels"] = 15
+    # model_cfg["in_channels"] = 10
     # stat_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="stat", device=device)
 
     for idx in selected_indices:
@@ -404,7 +398,7 @@ def evaluate_model_aov(config):
         # Get samples
         aov_sample = aov_dataset.__getitem__(idx)
         crop_coords = aov_sample["crop_coords"]
-        img_sample = img_dataset.__getitem__(idx, crop_coords=crop_coords)
+        img_sample = img_dataset.__getitem__(idx) # crop_coords=crop_coords)
 
         # Prepare inputs
         aov_input = aov_sample["input"].unsqueeze(0).to(device)
@@ -448,10 +442,8 @@ def benchmark_num_workers(config, batch_size=32, max_workers=8):
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
-        if config['standardisation']=='global':
-            full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
+        full_dataset = ImageDataset(**dataset_cfg, run_mode="test")
     elif dataset_cfg['mode']=='hist':
-        # full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
         full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
 
     logger.info(f"Total dataset size: {len(full_dataset)}")

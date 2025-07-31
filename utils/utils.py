@@ -2,6 +2,7 @@ import os
 import time
 import math
 import torch
+import pickle
 import logging
 import tifffile
 import numpy as np
@@ -229,7 +230,7 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
 
     inp_title = f"Input\nPSNR: {inp_psnr:.2f} dB" if inp_psnr else "Input"
     show_img(axes[0], input_img, inp_title)
-    show_img(axes[1], target_img, "Target (Standardised)")
+    show_img(axes[1], target_img, "Target")
     show_img(axes[2], noisy_img, "Noisy")
     pred_title = f"Predicted\nPSNR: {pred_psnr:.2f} dB" if pred_psnr else "Predicted"
     show_img(axes[3], preds[idx], pred_title)
@@ -302,6 +303,32 @@ def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
     plt.close()
 
     logger.info(f"Saved PSNR plot to {path}")
+
+
+def save_patches(patches, path):
+    """
+    Save a list of patch dictionaries to disk using pickle.
+
+    Args:
+        patches (List[Dict]): List of patch dictionaries containing crop data (e.g., spp1, noisy, clean, etc.).
+        path (str): File path where the patches will be saved (.pkl file recommended).
+    """
+    with open(path, "wb") as f:
+        pickle.dump(patches, f)
+
+
+def load_patches(path):
+    """
+    Load a list of patch dictionaries from a pickle file.
+
+    Args:
+        path (str): Path to the .pkl file containing the saved patches.
+
+    Returns:
+        List[Dict]: The list of patch dictionaries loaded from disk.
+    """
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 
 def decode_image_from_probs(probs, bin_edges):
@@ -543,10 +570,25 @@ def local_variance(image, window_size=16, save_path=None, cmap='viridis'):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight')
         plt.close()
-
     return var
 
+
 def sample_crop_coords_from_variance(varmap, crop_size):
+    """
+    Sample the top-left coordinates of a crop from an importance map (variance map),
+    using the average variance in each crop-sized window as the sampling probability.
+
+    Args:
+        varmap (torch.Tensor): 2D tensor of shape (H, W) representing per-pixel variance.
+        crop_size (int): Height and width of the square crop to extract.
+
+    Returns:
+        Tuple[int, int, int, int]: (i, j, crop_H, crop_W)
+            - i (int): Top row of the sampled crop.
+            - j (int): Left column of the sampled crop.
+            - crop_H (int): Crop height (same as crop_size).
+            - crop_W (int): Crop width (same as crop_size).
+    """
     H, W = varmap.shape
     crop_H, crop_W = crop_size, crop_size
 

@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import random
 import tifffile
@@ -7,7 +8,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 from torch.utils.data import Dataset
 # Utils
-from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance
+from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches
 from dataset.HistogramGenerator import generate_histograms, generate_histograms_torch, generate_hist_statistics
 
 import logging
@@ -17,17 +18,16 @@ logger = logging.getLogger(__name__)
 # IMAGE DENOISING IMAGE DATASET
 class ImageDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'img',
-                 data_augmentation: bool = True, virt_size: int = 1000,
+                 data_augmentation: bool = True, crops_per_scene: int = 1000,
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
-                 clean: bool = False, aov: bool = False, cached_dir: str = None, debug: bool = False, 
-                 device: str = None, hist_regeneration: bool = False, scene_names=None, 
-                 supervised: bool = False, global_mean = None, global_std = None, 
-                 tonemap: str = None, target_split: int = 1, run_mode: str = None):
+                 clean: bool = False, aov: bool = False, cached_dir: str = None, 
+                 debug: bool = False, device: str = None, scene_names=None, 
+                 supervised: bool = False, tonemap: str = None, target_split: int = 1, 
+                 run_mode: str = None, use_cached_crops = False):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
         self.data_augmentation = data_augmentation
-        self.virt_size = virt_size
         self.low_spp = low_spp
         self.high_spp = high_spp
         self.hist_bins = hist_bins
@@ -36,17 +36,12 @@ class ImageDataset(Dataset):
         self.cached_dir = cached_dir
         self.debug = debug
         self.device = device or torch.device("cpu")
-        self.hist_regeneration = hist_regeneration
         self.tonemap = tonemap
         self.target_split = target_split
         self.run_mode = run_mode
 
-        # mean/std for normalisation
-        # TODO: try normalising by only dividing by the mean per image 
-        # DONE but global mean and var don't give improvements since the images are very different from one another
-        self.image_mean_std = {}  # (scene) -> (mean, std)
-        self.global_mean = global_mean
-        self.global_std = global_std
+        self.use_cached_crops = use_cached_crops
+        self.crops_per_scene = crops_per_scene
 
         self.supervised = supervised
         if self.supervised:
@@ -140,30 +135,44 @@ class ImageDataset(Dataset):
             varmap = local_variance(self.noisy_images[key], window_size=15, save_path=heatmap_path, cmap='viridis')
             logger.info(f"Sampling Map Shape: {varmap.shape}")
             self.variance_heatmaps[key] = varmap
-
-            # Decide how many patches to extract per scene (or all patches on a grid)
-            patches_per_scene = 100 # self.virt_size // len(self.scene_names) or 200 on GPU # TODO: set to be configurable
             
-            # Sample patches_per_scene patches weighted by variance
             # TODO: currently 1 min x 100 patches per scene --> could speed it up ?
-            for _ in range(patches_per_scene):
-                i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
-                spp1_patch = self.spp1_images[key][:, :, i:i+h, j:j+w]          # tensor (N, 3, h, w)
-                noisy_patch = self.noisy_images[key][:, i:i+h, j:j+w]           # tensor (3, h, w)
-                clean_patch = self.clean_images[key][:, i:i+h, j:j+w] if self.clean and key in self.clean_images else None
-                albedo_patch = self.albedo_images[key][:, i:i+h, j:j+w] if self.aov and key in self.albedo_images else None
-                normal_patch = self.normal_images[key][:, i:i+h, j:j+w] if self.aov and key in self.normal_images else None
+            patch_cache_path = os.path.join(self.cached_dir, f"{key}_{crops_per_scene}_{self.crop_size}.pkl")
 
-                # Save patch dict
-                self.patches.append({
-                    "scene": key,
-                    "spp1": spp1_patch,
-                    "noisy": noisy_patch,
-                    "clean": clean_patch,
-                    "albedo": albedo_patch,
-                    "normal": normal_patch,
-                    "crop_coords": (i, j, h, w)
-                })
+            if self.use_cached_crops and os.path.exists(patch_cache_path):
+                logger.info(f"Loading cached patches from {patch_cache_path}")
+                scene_patches = load_patches(patch_cache_path)
+            else:
+                logger.info(f"Generating patches for scene {key}")
+                scene_patches = []
+                start_time = time.time()
+
+                for _ in range(self.crops_per_scene):
+                    i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
+                    spp1_patch = self.spp1_images[key][:, :, i:i+h, j:j+w]         
+                    noisy_patch = self.noisy_images[key][:, i:i+h, j:j+w]          
+                    clean_patch = self.clean_images[key][:, i:i+h, j:j+w] if self.clean and key in self.clean_images else None
+                    albedo_patch = self.albedo_images[key][:, i:i+h, j:j+w] if self.aov and key in self.albedo_images else None
+                    normal_patch = self.normal_images[key][:, i:i+h, j:j+w] if self.aov and key in self.normal_images else None
+
+                    scene_patches.append({
+                        "scene": key,
+                        "spp1": spp1_patch,
+                        "noisy": noisy_patch,
+                        "clean": clean_patch,
+                        "albedo": albedo_patch,
+                        "normal": normal_patch,
+                        "crop_coords": (i, j, h, w)
+                    })
+
+                elapsed = time.time() - start_time
+                logger.info(f"Finished generating {self.crops_per_scene} crops for scene '{key}' in {elapsed:.2f} seconds!")
+
+                if self.cached_dir:
+                    save_patches(scene_patches, patch_cache_path)
+                    logger.info(f"Saved {len(scene_patches)} patches to {patch_cache_path}")
+
+            self.patches.extend(scene_patches)
 
         logger.info(f"Total patches collected: {len(self.patches)}")
 
@@ -260,7 +269,6 @@ class ImageDataset(Dataset):
             "scene": patch.get("scene", None),
             "crop_coords": patch.get("crop_coords", None),
         }
-
 
 
 
@@ -414,7 +422,7 @@ class CropHistogramDataset(Dataset):
         input_cropped = input_samples_tensor[:, :, i:i+h, j:j+w]        # (N, 3, crop_h, crop_w)
 
         # Histogram
-        hist_tensor, bin_edges_tensor = generate_histograms_torch(input_cropped, self.hist_bins, self.device)   # (H, W, 3, bins)
+        hist_tensor, bin_edges_tensor = generate_histograms_torch(input_cropped, self.hist_bins, self.device, log_binning=True)   # (H, W, 3, bins)
         hist_sum = torch.sum(hist_tensor, dim=-1, keepdim=True) + 1e-8
         hist_norm = hist_tensor / hist_sum                             # (H, W, 3, bins)
         hist_torch = hist_norm.permute(2, 3, 0, 1).contiguous()        # (3, bins, H, W)
@@ -554,7 +562,7 @@ class HistogramBinomDataset(Dataset):
             assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 
             # HISTOGRAM GENERATION
-            hist, bin_edges = generate_histograms_torch(self.spp1_images[key], self.hist_bins, self.device)
+            hist, bin_edges = generate_histograms_torch(self.spp1_images[key], self.hist_bins, self.device, log_binning=True)
             self.hist_features[key] = hist
             self.bin_edges[key] = bin_edges
 
@@ -739,7 +747,7 @@ class CropHistogramBinomDataset(Dataset):
             clean_tensor = clean_tensor[:, i:i+h, j:j+w]
 
         # ACCUMULATE HISTOGRAM HERE PER CROP !!!! 
-        hist, bin_edges_tensor = generate_histograms_torch(spp1_samples, self.hist_bins, self.device)
+        hist, bin_edges_tensor = generate_histograms_torch(spp1_samples, self.hist_bins, self.device, log_binning=True)
 
         # BINOMIAL SPLIT
         target_sample = random.choice([2, 4, 8, 12, 16, 20, 24, 28, 30])

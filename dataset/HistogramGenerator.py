@@ -107,55 +107,62 @@ def accumulate_histogram_gpu(samples, bin_edges, num_bins):
     return hist
 
 
-def generate_histograms(samples, num_bins, device=None, debug=False):
+def generate_histograms(samples, num_bins, device=None, debug=False, log_binning=False, min_val=None, max_val=None):
     """
-    Generate histograms per pixel per channel from input samples.
-    Uses GPU acceleration via PyTorch if CUDA is available.
-    
+    Generate histograms per pixel per channel from input samples using CPU (NumPy + Numba).
+
     Args:
         samples (np.array): Shape (N, H, W, 3), input radiance samples
         num_bins (int): Number of histogram bins
         debug (bool): Print debug info
-    
+        log_binning (bool): Use logarithmic binning if True
+        min_val (float): Optional manual minimum radiance
+        max_val (float): Optional manual maximum radiance
+
     Returns:
         hist (torch.Tensor): Shape (H, W, 3, B), histogram per pixel per channel
         bin_edges (torch.Tensor): Shape (B+1,), bin edges
     """
     _, H, W, _ = samples.shape
-    min_val, max_val = estimate_range(samples, debug=debug)
-    # logger.info(f"Estimated Range: {min_val} - {max_val} !")
-    # TODO: add support for log spaced bins
-    bin_edges = np.linspace(min_val, max_val, num_bins + 1)
-    hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
+    if min_val is None or max_val is None:
+        min_val, max_val = estimate_range(samples, debug=debug)
+    if log_binning:
+        bin_edges = np.logspace(np.log10(max(min_val, 1e-4)), np.log10(max_val), num_bins + 1)
+    else:
+        bin_edges = np.linspace(min_val, max_val, num_bins + 1)
 
-    samples = samples.transpose(0, 2, 3, 1) 
+    hist = np.zeros((H, W, 3, num_bins), dtype=np.int32)
+    samples = samples.transpose(0, 2, 3, 1)  # shape (N, W, H, 3)
     accumulate_histogram_numba(hist, samples, bin_edges, num_bins)
+
     hist = torch.from_numpy(hist).float()
-    bin_edges = torch.from_numpy(bin_edges).float() 
+    bin_edges = torch.from_numpy(bin_edges).float()
     return hist, bin_edges
 
 
-def generate_histograms_torch(samples, num_bins, device=None, debug=False):
+def generate_histograms_torch(samples, num_bins, device=None, debug=False, log_binning=False, min_val=None, max_val=None):
     """
-    Generate histograms per pixel per channel from input samples.
-    Uses GPU acceleration via PyTorch if CUDA is available.
-    
+    Generate histograms per pixel per channel from input samples using GPU (PyTorch).
+
     Args:
         samples (torch.Tensor): Shape (N, H, W, 3), input radiance samples
         num_bins (int): Number of histogram bins
-        debug (bool): Print debug info
-    
+        log_binning (bool): Use logarithmic binning if True
+        min_val (float): Optional manual minimum radiance
+        max_val (float): Optional manual maximum radiance
+
     Returns:
         hist (torch.Tensor): Shape (H, W, 3, B), histogram per pixel per channel
         bin_edges (torch.Tensor): Shape (B+1,), bin edges
     """
     _, H, W, _ = samples.shape
-    min_val, max_val = estimate_range(samples, debug=debug)
-    # logger.info(f"Estimated Range: {min_val} - {max_val} !")
-    # TODO: add support for log spaced bins
-    bin_edges = torch.linspace(min_val, max_val, num_bins + 1)
+    if min_val is None or max_val is None:
+        min_val, max_val = estimate_range(samples, debug=debug)
+    if log_binning:
+        bin_edges = torch.logspace(torch.log10(torch.tensor(max(min_val, 1e-4))), torch.log10(torch.tensor(max_val)), steps=num_bins + 1, device=samples.device)
+    else:
+        bin_edges = torch.linspace(min_val, max_val, num_bins + 1, device=samples.device)
 
-    # samples = samples.permute(0, 2, 3, 1).contiguous()
     hist = accumulate_histogram_gpu(samples, bin_edges, num_bins)
     return hist, bin_edges
 
