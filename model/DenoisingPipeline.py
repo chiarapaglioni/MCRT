@@ -119,18 +119,20 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
     total_loss = 0
 
     for batch_idx, batch in enumerate(dataloader):
+        # TODO: try applying tone mapping over the whole input
         hdr_input = batch['input'].to(device)               # B, 3, H, W (img) or # B, 9, H, W (aov) or # B, 15, H, W (aov + stat)
         hdr_target = batch['target'].to(device)             # B, 3, H, W
         crop_mean = batch['mean'].to(device)
 
         optimizer.zero_grad()
 
-        # Apply tonemapping to input if tonemap != none
-        tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
+        # Apply tonemapping to input if tonemap != none ALREADY TONAMAPPED IN DATA LOADER
+        # tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
+        tonemapped_input = hdr_input
         pred = model(tonemapped_input)                      # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
-        if batch_idx % 100 == 0:
+        if batch_idx % 1 == 0:
             # Only take RGB channels if input has more than 3 channels
             input_rgb = tonemapped_input[:, :3] if tonemapped_input.shape[1] > 3 else tonemapped_input
 
@@ -140,7 +142,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
             logger.info("-------------------------------------------------------------------")
 
         # LOSS (in tonemapped space if tonemap != none)
-        loss = criterion(apply_tonemap(pred, tonemap=tonemap), apply_tonemap(hdr_target, tonemap=tonemap))
+        loss = criterion(apply_tonemap(pred, tonemap="reinhard_gamma"), apply_tonemap(hdr_target, tonemap="none"))
         loss.backward()
         optimizer.step()
 
@@ -168,16 +170,17 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             crop_mean = batch['mean'].to(device)
 
             # Apply tonemapping to input if tonemap != none
-            tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
+            # tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
+            tonemapped_input = hdr_input
             pred = model(tonemapped_input)                  # B, 3, H, W (HDR space)
 
-            loss = criterion(pred, hdr_target)
+            loss = criterion(apply_tonemap(pred, tonemap="reinhard_gamma"), apply_tonemap(hdr_target, tonemap="none"))
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
                 mean_i = crop_mean[i]  # scalar
-                pred_i_hdr = pred[i] * mean_i.view(-1, 1, 1)
-                clean_i_hdr = clean[i] * mean_i.view(-1, 1, 1)
+                pred_i_hdr = pred[i] # * mean_i.view(-1, 1, 1)
+                clean_i_hdr = clean[i] # * mean_i.view(-1, 1, 1)
 
                 total_psnr += compute_psnr(pred_i_hdr, clean_i_hdr)
                 count += 1

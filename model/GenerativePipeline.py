@@ -623,7 +623,9 @@ def iterative_evaluate(config):
                 probs = torch.softmax(logits, dim=2)
                 pred_radiance = decode_image_from_probs(probs, bin_edges)
 
-                accumulated_radiance += (pred_radiance / num_steps)
+                # TODO: uncomment previous logic for residual prediction
+                # accumulated_radiance += (pred_radiance / num_steps)
+                accumulated_radiance = pred_radiance
 
                 psnr = compute_psnr(accumulated_radiance[0], clean_img[0])
                 axs[step].imshow(accumulated_radiance[0].permute(1, 2, 0).detach().cpu().numpy())
@@ -648,28 +650,26 @@ def iterative_evaluate(config):
             print(f"Saved plot to {plot_path}")
 
 
-def visualize_predictions(model, dataloader, device, num_samples=5):
+def visualize_residual_predictions(model, dataloader, device, num_samples=5):
     model.eval()
 
     with torch.no_grad():
         count = 0
         for batch in dataloader:
-            input_hist = batch['input_hist'].to(device)                  # (B, C, bins, H, W)
-            target_hist = batch['target_hist'].to(device) - input_hist   # residual histogram (already normalized)
-            bin_edges = batch['bin_edges'].to(device)                    # (B, bins+1)
-            clean = batch['clean']                                        # clean image for PSNR comparison
+            input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W)
+            target_hist = batch['target_hist'].to(device) - input_hist      # residual histogram (already normalized)
+            bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+            clean = batch['clean']                                          # clean image for PSNR comparison
 
-            pred_logits = model(input_hist)                               # (B, C, bins, H, W)
+            pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
 
             # Permute for consistency: (B, C, H, W, bins)
             pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()
             target_hist = target_hist.permute(0, 1, 3, 4, 2).contiguous()
 
-            # Convert predicted residual logits -> probabilities with softmax
-            residual_probs = torch.softmax(pred_logits, dim=-1)          # (B, C, H, W, bins)
-
-            # Permute residual_probs back to (B, C, bins, H, W) for addition
-            residual_probs = residual_probs.permute(0, 1, 4, 2, 3)
+            # Convert predicted logits to probabilities with softmax
+            residual_probs = torch.softmax(pred_logits, dim=-1)             # (B, C, H, W, bins)
+            residual_probs = residual_probs.permute(0, 1, 4, 2, 3)          # (B, C, bins, H, W)
 
             # Add predicted residual probabilities to input histogram and clamp
             pred_hist_reconstructed = input_hist + residual_probs
@@ -687,6 +687,53 @@ def visualize_predictions(model, dataloader, device, num_samples=5):
             input_rgb_img = decode_image_from_probs(input_hist, bin_edges)                 # (B,C,H,W)
             target_rgb_img = decode_image_from_probs(target_hist_reconstructed, bin_edges) # (B,C,H,W)
             pred_rgb_img = decode_image_from_probs(pred_hist_reconstructed, bin_edges)     # (B,C,H,W)
+
+            # Compute PSNR with clean images
+            psnr_input_clean = compute_psnr(input_rgb_img, clean.to(device))
+            psnr_pred_clean = compute_psnr(pred_rgb_img, clean.to(device))
+
+            B, _, _, _, _ = input_hist.shape
+
+            for i in range(B):
+                # IMAGE PREDICTIONS
+                _, axes = plt.subplots(1, 4, figsize=(12, 4))
+                axes[0].imshow(pred_rgb_img[i].cpu().permute(1, 2, 0))
+                axes[0].set_title(f'Predicted RGB {psnr_pred_clean}')
+                axes[1].imshow(target_rgb_img[i].cpu().permute(1, 2, 0))
+                axes[1].set_title('Target RGB')
+                axes[2].imshow(clean[i].cpu().permute(1, 2, 0))
+                axes[2].set_title('Clean (High SPP)')
+                axes[3].imshow(input_rgb_img[i].cpu().permute(1, 2, 0))
+                axes[3].set_title(f'Input RGB {psnr_input_clean}')
+
+                for ax in axes:
+                    ax.axis('off')
+                plt.tight_layout()
+                plt.show()
+
+                count += 1
+                if count >= num_samples:
+                    return
+                
+
+def visualize_predictions(model, dataloader, device, num_samples=5):
+    model.eval()
+
+    with torch.no_grad():
+        count = 0
+        for batch in dataloader:
+            input_hist = batch['input_hist'].to(device)                         # (B, C, bins, H, W)
+            target_hist = batch['target_hist'].to(device)                       # residual histogram (already normalized)
+            bin_edges = batch['bin_edges'].to(device)                           # (B, bins+1)
+            clean = batch['clean']                                              # clean image for PSNR comparison
+
+            pred_logits = model(input_hist)                                     # (B, C, bins, H, W) logits
+            pred_probs = torch.softmax(pred_logits, dim=2)                      # (B, C, bins, H, W) probs
+
+            # Decode histograms to RGB images
+            input_rgb_img = decode_image_from_probs(input_hist, bin_edges)      # (B,C,H,W)
+            target_rgb_img = decode_image_from_probs(target_hist, bin_edges)    # (B,C,H,W)
+            pred_rgb_img = decode_image_from_probs(pred_probs, bin_edges)       # (B,C,H,W)
 
             # Compute PSNR with clean images
             psnr_input_clean = compute_psnr(input_rgb_img, clean.to(device))
@@ -749,7 +796,10 @@ def test_histogram_generator(config):
 
     # Run visualization
     num_samples = config.get("num_samples", 4)
-    visualize_predictions(model, val_loader, device, num_samples=num_samples)
+    if config['gen_mode']=='res':
+        visualize_residual_predictions(model, val_loader, device, num_samples=num_samples)
+    else: 
+        visualize_predictions(model, val_loader, device, num_samples=num_samples)
 
 
 def plot_input_vs_prediction(input_hist, residual, bin_edges, device, step_info="", clean_img=None):

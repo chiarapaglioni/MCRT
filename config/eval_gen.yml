@@ -1,8 +1,9 @@
 # Evaluation Parameters
-model_path: checkpoints/20250729_hist2hist_dist_20ep.pth
+model_path: results/h2h/20250729_hist2hist_dist_20ep_crop.pth
 num_workers: 4
 num_samples: 10       # number of images to test during the evaluate step
 num_steps: 10         # number of iterations to perform during generative accumulation of radiance
+gen_mode: img         # 'img' for probability of radiance across image or 'res' for residual probability
 
 model:
   model_name: gap
