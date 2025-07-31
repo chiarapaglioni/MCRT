@@ -40,7 +40,6 @@ class LHDRLoss(nn.Module):
         loss = ((denoised - target) ** 2) / (denoised + self.epsilon)**2
         return torch.mean(loss.view(-1))
 
-
 class RelativeMSELoss(nn.Module):
     def __init__(self, epsilon=1e-6):
         super().__init__()
@@ -49,7 +48,6 @@ class RelativeMSELoss(nn.Module):
     def forward(self, input, target):
         return torch.mean((input - target)**2 / (target + self.epsilon)**2)
     
-
 class SMAPELoss(nn.Module):
     def __init__(self, epsilon=1e-2):
         super(SMAPELoss, self).__init__()
@@ -134,7 +132,7 @@ def evaluate_sample(model, input_tensor, clean_tensor):
 
 
 # TRAINING STEP
-def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=None, debug=True):
+def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=None, debug=True, plot_every_n=10):
     model.train()
     total_loss = 0
 
@@ -142,14 +140,13 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         # TODO: try applying tone mapping over the whole input
         hdr_input = batch['input'].to(device)               # B, 3, H, W (img) or # B, 9, H, W (aov) or # B, 15, H, W (aov + stat)
         hdr_target = batch['target'].to(device)             # B, 3, H, W
-        crop_mean = batch['mean'].to(device)
 
         optimizer.zero_grad()
 
         pred = model(hdr_input)                      # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
-        if batch_idx % 10 == 0:
+        if batch_idx % 50 == 0:
             # Only take RGB channels if input has more than 3 channels
             input_rgb = hdr_input[:, :3] if hdr_input.shape[1] > 3 else hdr_input
             pred_tonamepped = apply_tonemap(pred, tonemap="none"),
@@ -167,7 +164,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
         total_loss += loss.item()
 
         # DEBUG (plot the first batch)
-        if debug and batch_idx==0 and epoch%1==0:
+        if debug and batch_idx==0 and epoch is not None and (epoch % plot_every_n):
             plot_debug_images(batch, preds=pred_tonamepped[0], epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)
@@ -185,7 +182,6 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             hdr_input = batch['input'].to(device)           # B, 3, H, W
             hdr_target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)               # B, 3, H, W
-            crop_mean = batch['mean'].to(device)
 
             pred = model(hdr_input)                         # B, 3, H, W (HDR space)
 
@@ -193,9 +189,8 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
-                mean_i = crop_mean[i]  # scalar
-                pred_i_hdr = pred[i] # * mean_i.view(-1, 1, 1)
-                clean_i_hdr = clean[i] # * mean_i.view(-1, 1, 1)
+                pred_i_hdr = pred[i]
+                clean_i_hdr = clean[i]
 
                 total_psnr += compute_psnr(apply_tonemap(pred_i_hdr, tonemap="none"), apply_tonemap(clean_i_hdr, tonemap="none"))
                 count += 1

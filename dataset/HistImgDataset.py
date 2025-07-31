@@ -118,13 +118,15 @@ class ImageDataset(Dataset):
             if self.aov:
                 # ALBEDO
                 albedo_path = os.path.join(folder, albedo_file)
-                albedo_img = tifffile.imread(albedo_path)                                           # (H, W, 3)
-                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()     # (3, H, W)
+                albedo_img = tifffile.imread(albedo_path)                                   # (H, W, 3)
+                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()       # (3, H, W)
+                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")                 # TONEMAPPING
                 self.albedo_images[key] = albedo_tensor
                 # NORMAL
                 normal_path = os.path.join(folder, normal_file)
-                normal_img = tifffile.imread(normal_path)                                           # (H, W, 3)
-                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()     # (3, H, W)
+                normal_img = tifffile.imread(normal_path)                                   # (H, W, 3)
+                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()       # (3, H, W)
+                normal_tensor = (normal_tensor + 1.0) * 0.5                                 # NORMALISATION
                 self.normal_images[key] = normal_tensor
 
     def __len__(self):
@@ -150,32 +152,37 @@ class ImageDataset(Dataset):
         input_samples = spp1_img[input_idx]                         # (low_spp-N, 3, H, W)
         target_sample = spp1_img[target_idx]                        # (N, 3, H, W)
 
-        # INPUT FEATURES
-        rgb_stats = generate_hist_statistics(input_samples)
-
-        # TONEMAPPING + NORMALISATION
-        # (over the whole image because if done per crop could distort the values)
-        albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
-        normal_tensor = (normal_tensor + 1.0) * 0.5
-
         if self.mode == "stat":
-            mean_img = rgb_stats['mean'].permute(2, 0, 1).float()               # (3, H, W)
-            mean_img = apply_tonemap(mean_img, tonemap="log") 
+            # INPUT FEATURES
+            rgb_stats = generate_hist_statistics(spp1_img[input_idx])           # STACK tensor
+            # rgb_stats = generate_hist_statistics(spp1_img)                    # NOISY tensor
 
+            mean_img = rgb_stats['mean']                                        # (3, H, W)
+            mean_img = apply_tonemap(mean_img, tonemap="log") 
             rel_var = rgb_stats['relative_variance'].permute(2, 0, 1).float()   # (3, H, W)
+            rel_var = apply_tonemap(rel_var, tonemap="log") 
 
             # Compose input by concatenating mean + relative variance along channel dim
-            input_tensor = torch.cat([mean_img, rel_var], dim=0)    # (6, H, W)
+            input_tensor = torch.cat([mean_img, rel_var], dim=0)                # (6, H, W) or # (4, H, W)
         else: 
-            input_tensor = noisy_tensor.clone()
+            # NOISY tensor
+            # input_tensor = noisy_tensor.clone()
+            # input_tensor = apply_tonemap(input_tensor, tonemap="log")
+
+            # STACK tensor: the first N input samples from spp1_img
+            input_samples = spp1_img[input_idx]                         # (N, H, W, 3)
+            input_tensor = input_samples.mean(dim=0)                    # (3, H, W)
             input_tensor = apply_tonemap(input_tensor, tonemap="log")
 
         # TARGET
         if self.supervised:
             target_tensor = clean_tensor   
-        else: 
-            target_tensor = target_sample.mean(axis=0)                # (3, H, W)
+        else:
+            # NOISY tensor
             # target_tensor = noisy_tensor                            # (3, H, W)
+
+            # STACK tensor: the last N input samples from spp1_img
+            target_tensor = target_sample.mean(dim=0)                # (3, H, W)
 
         # CROP
         if self.crop_size:
@@ -192,10 +199,6 @@ class ImageDataset(Dataset):
                 albedo_tensor = albedo_tensor[..., i:i+h, j:j+w]
             if normal_tensor is not None:
                 normal_tensor = normal_tensor[..., i:i+h, j:j+w]
-
-        # NORMALISE BY MEAN PER CROP (after cropping)
-        # TODO: to be discarded --> currently unused
-        crop_mean = input_tensor.mean(dim=(1,2), keepdim=True) + 1e-6  # avoid divide by zero
 
         # AOV
         if self.aov:
@@ -223,7 +226,6 @@ class ImageDataset(Dataset):
             "noisy": noisy_tensor,                                          # (3, crop_size, crop_size) or (3, H, W)
             "clean": clean_tensor if clean_tensor is not None else None,    # (3, crop_size, crop_size) or None
             "scene": scene,
-            "mean": crop_mean,
             "crop_coords": (i, j, h, w) if self.crop_size else None,              
         }
 

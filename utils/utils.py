@@ -178,7 +178,6 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     input_imgs = batch['input'].cpu()
     noisy_imgs = batch['noisy'].cpu()
     target_imgs = batch['target'].cpu()
-    crop_mean = batch['mean'].cpu()
     clean_imgs = batch.get('clean', None)
     bin_edges = batch.get('bin_edges', None)
     if clean_imgs is not None:
@@ -209,11 +208,10 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
         input_img = input_imgs[idx]
 
     # recover images from mean
-    # input_img = input_img # * crop_mean[idx].view(-1, 1, 1)
-    clean_img = clean_imgs[idx] # * crop_mean[idx].view(-1, 1, 1)
-    pred_img = preds[idx] # * crop_mean[idx].view(-1, 1, 1)
-    target_img = target_imgs[idx] # * crop_mean[idx].view(-1, 1, 1)
-    noisy_img = noisy_imgs[idx] # * crop_mean[idx].view(-1, 1, 1)
+    clean_img = clean_imgs[idx]
+    pred_img = preds[idx]
+    target_img = target_imgs[idx]
+    noisy_img = noisy_imgs[idx]
 
     # Compute PSNR
     inp_psnr = compute_psnr(input_img, clean_img) if input_imgs is not None else None
