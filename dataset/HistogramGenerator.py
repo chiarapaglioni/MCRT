@@ -162,7 +162,7 @@ def generate_histograms_torch(samples, num_bins, device=None, debug=False):
 
 def generate_hist_statistics(samples, device=None):
     """
-    Compute mean and relative variance of radiance per pixel per channel.
+    Compute mean and relative luminance variance of radiance per pixel.
 
     Args:
         samples (torch.Tensor): Shape (N, H, W, 3), input radiance samples
@@ -171,16 +171,24 @@ def generate_hist_statistics(samples, device=None):
     Returns:
         stats (dict): {
             'mean': torch.Tensor of shape (H, W, 3),
-            'relative_variance': torch.Tensor of shape (H, W, 3),  # variance / mean^2, per channel
+            'relative_variance': torch.Tensor of shape (H, W, 1),  # single channel: luminance
         }
     """
     epsilon = 1e-6
     mean = samples.mean(dim=0)                          # (H, W, 3)
     mean_sq = (samples ** 2).mean(dim=0)                # (H, W, 3)
     var = mean_sq - mean ** 2                           # (H, W, 3)
-    relative_variance = var / (mean ** 2 + epsilon)     # (H, W, 3), per channel
+    relative_var = var / (mean ** 2 + epsilon)          # (H, W, 3)
 
-    # Clamp relative variance to [0, 1] since paper mentions it is bounded for non-negative features
-    relative_variance = torch.clamp(relative_variance, 0.0, 1.0)
+    # Luminance conversion (standard Rec.709)
+    rel_var_lum = (
+        0.2126 * relative_var[..., 0] +
+        0.7152 * relative_var[..., 1] +
+        0.0722 * relative_var[..., 2]
+    ).unsqueeze(-1)  # (H, W, 1)
 
-    return {'mean': mean, 'relative_variance': relative_variance}
+    # Clamp if needed
+    rel_var_lum = torch.clamp(rel_var_lum, 0.0, 1.0)
+
+    return {'mean': mean, 'relative_variance': rel_var_lum}
+
