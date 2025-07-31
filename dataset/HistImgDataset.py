@@ -151,30 +151,31 @@ class ImageDataset(Dataset):
         target_sample = spp1_img[target_idx]                        # (N, 3, H, W)
 
         # INPUT FEATURES
-        stats = generate_hist_statistics(input_samples)
-        # input_tensor = stats['mean']                                # default input (3, H, W)
-        input_tensor = noisy_tensor.clone()
+        rgb_stats = generate_hist_statistics(input_samples)
 
         # TONEMAPPING + NORMALISATION
         # (over the whole image because if done per crop could distort the values)
-        input_tensor = apply_tonemap(input_tensor, tonemap="log") 
         albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
         normal_tensor = (normal_tensor + 1.0) * 0.5
-    
-        # STATS (concatenate variance and std to input channels)
+
         if self.mode == "stat":
-            input_tensor = torch.cat([
-                input_tensor, stats['variance'] #, stats['std']
-            ], dim=0)  # Shape (6, H, W)
+            mean_img = rgb_stats['mean'].permute(2, 0, 1).float()               # (3, H, W)
+            mean_img = apply_tonemap(mean_img, tonemap="log") 
+
+            rel_var = rgb_stats['relative_variance'].permute(2, 0, 1).float()   # (3, H, W)
+
+            # Compose input by concatenating mean + relative variance along channel dim
+            input_tensor = torch.cat([mean_img, rel_var], dim=0)    # (6, H, W)
+        else: 
+            input_tensor = noisy_tensor.clone()
+            input_tensor = apply_tonemap(input_tensor, tonemap="log")
 
         # TARGET
         if self.supervised:
             target_tensor = clean_tensor   
         else: 
             target_tensor = target_sample.mean(axis=0)                # (3, H, W)
-            # target_tensor= noisy_tensor                             # (3, H, W)
-
-        # target_tensor = apply_tonemap(target_tensor, tonemap="none")
+            # target_tensor = noisy_tensor                            # (3, H, W)
 
         # CROP
         if self.crop_size:

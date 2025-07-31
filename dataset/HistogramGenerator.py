@@ -162,21 +162,25 @@ def generate_histograms_torch(samples, num_bins, device=None, debug=False):
 
 def generate_hist_statistics(samples, device=None):
     """
-    Compute mean and variance of radiance per pixel per channel.
+    Compute mean and relative variance of radiance per pixel per channel.
 
     Args:
-        samples (torch.Tesor): Shape (N, H, W, 3), input radiance samples
+        samples (torch.Tensor): Shape (N, H, W, 3), input radiance samples
         device (str or torch.device, optional): Compute device (CPU or CUDA)
 
     Returns:
         stats (dict): {
             'mean': torch.Tensor of shape (H, W, 3),
-            'variance': torch.Tensor of shape (H, W, 3),
-            'std': torch.Tensor of shape (H, W, 3)       -------> currently usused becauses it was generating NaN in square root
+            'relative_variance': torch.Tensor of shape (H, W, 3),  # variance / mean^2, per channel
         }
     """
-    mean = samples.mean(dim=0)                 # (H, W, 3)
-    mean_sq = (samples ** 2).mean(dim=0)       # (H, W, 3)
-    var = mean_sq - mean ** 2                  # (H, W, 3)
-    std = torch.sqrt(var + 1e-8)               # (H, W, 3), safe sqrt
-    return {'mean': mean, 'variance': var, 'std': std}
+    epsilon = 1e-6
+    mean = samples.mean(dim=0)                          # (H, W, 3)
+    mean_sq = (samples ** 2).mean(dim=0)                # (H, W, 3)
+    var = mean_sq - mean ** 2                           # (H, W, 3)
+    relative_variance = var / (mean ** 2 + epsilon)     # (H, W, 3), per channel
+
+    # Clamp relative variance to [0, 1] since paper mentions it is bounded for non-negative features
+    relative_variance = torch.clamp(relative_variance, 0.0, 1.0)
+
+    return {'mean': mean, 'relative_variance': relative_variance}
