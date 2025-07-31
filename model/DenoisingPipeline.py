@@ -48,6 +48,26 @@ class RelativeMSELoss(nn.Module):
 
     def forward(self, input, target):
         return torch.mean((input - target)**2 / (target + self.epsilon)**2)
+    
+
+class SMAPELoss(nn.Module):
+    def __init__(self, epsilon=1e-2):
+        super(SMAPELoss, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, prediction, target):
+        """
+        prediction, target: tensors of shape [batch_size, channels, height, width]
+        Expected channels = 3 (RGB)
+        """
+        numerator = torch.abs(prediction - target)
+        denominator = torch.abs(prediction) + torch.abs(target) + self.epsilon
+        
+        # Calculate per-pixel, per-channel SMAPE
+        smape_map = numerator / denominator
+        
+        # Average over pixels, channels, and batch
+        return smape_map.mean()
 
 
 def get_data_loaders(config, run_mode="train"):
@@ -102,7 +122,7 @@ def get_sample(dataset, idx=0, device='cpu'):
 
 def evaluate_sample(model, input_tensor, clean_tensor):
     with torch.no_grad():
-        tonemapped_input = apply_tonemap(input_tensor, "reinhard_gamma")
+        tonemapped_input = input_tensor # apply_tonemap(input_tensor, "reinhard_gamma")
         pred = model(tonemapped_input)
         clean = clean_tensor
 
@@ -126,23 +146,21 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
 
         optimizer.zero_grad()
 
-        # Apply tonemapping to input if tonemap != none ALREADY TONAMAPPED IN DATA LOADER
-        # tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
-        tonemapped_input = hdr_input
-        pred = model(tonemapped_input)                      # B, 3, H, W (HDR space)
+        pred = model(hdr_input)                      # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
-        if batch_idx % 1 == 0:
+        if batch_idx % 10 == 0:
             # Only take RGB channels if input has more than 3 channels
-            input_rgb = tonemapped_input[:, :3] if tonemapped_input.shape[1] > 3 else tonemapped_input
+            input_rgb = hdr_input[:, :3] if hdr_input.shape[1] > 3 else hdr_input
+            pred_tonamepped = apply_tonemap(pred, tonemap="none"),
 
             logger.info(f"Input (RGB) Min {input_rgb.min():.4f} - Max {input_rgb.max():.4f} - Mean {input_rgb.mean():.4f} - Var {input_rgb.var():.4f}")
             logger.info(f"Target Min {hdr_target.min():.4f} - Max {hdr_target.max():.4f} - Mean {hdr_target.mean():.4f} - Var {hdr_target.var():.4f}")
-            logger.info(f"Pred Min {pred.min():.4f} - Max {pred.max():.4f} - Mean {pred.mean():.4f} - Var {pred.var():.4f}")
+            logger.info(f"Pred Min {pred_tonamepped[0].min():.4f} - Max {pred_tonamepped[0].max():.4f} - Mean {pred_tonamepped[0].mean():.4f} - Var {pred_tonamepped[0].var():.4f}")
             logger.info("-------------------------------------------------------------------")
 
         # LOSS (in tonemapped space if tonemap != none)
-        loss = criterion(apply_tonemap(pred, tonemap="reinhard_gamma"), apply_tonemap(hdr_target, tonemap="none"))
+        loss = criterion(apply_tonemap(pred, tonemap="none"), apply_tonemap(hdr_target, tonemap="none"))
         loss.backward()
         optimizer.step()
 
@@ -150,7 +168,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
 
         # DEBUG (plot the first batch)
         if debug and batch_idx==0 and epoch%1==0:
-            plot_debug_images(batch, preds=pred, epoch=epoch, batch_idx=batch_idx, correct=True)
+            plot_debug_images(batch, preds=pred_tonamepped[0], epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)
 
@@ -169,12 +187,9 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             clean = batch['clean'].to(device)               # B, 3, H, W
             crop_mean = batch['mean'].to(device)
 
-            # Apply tonemapping to input if tonemap != none
-            # tonemapped_input = apply_tonemap(hdr_input, tonemap=tonemap) 
-            tonemapped_input = hdr_input
-            pred = model(tonemapped_input)                  # B, 3, H, W (HDR space)
+            pred = model(hdr_input)                         # B, 3, H, W (HDR space)
 
-            loss = criterion(apply_tonemap(pred, tonemap="reinhard_gamma"), apply_tonemap(hdr_target, tonemap="none"))
+            loss = criterion(apply_tonemap(pred, tonemap="none"), apply_tonemap(hdr_target, tonemap="none"))
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
@@ -182,7 +197,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
                 pred_i_hdr = pred[i] # * mean_i.view(-1, 1, 1)
                 clean_i_hdr = clean[i] # * mean_i.view(-1, 1, 1)
 
-                total_psnr += compute_psnr(pred_i_hdr, clean_i_hdr)
+                total_psnr += compute_psnr(apply_tonemap(pred_i_hdr, tonemap="none"), apply_tonemap(clean_i_hdr, tonemap="none"))
                 count += 1
 
     avg_loss = total_loss / len(dataloader)
@@ -239,6 +254,8 @@ def train_model(config):
         criterion = LHDRLoss()              # when input tone mapping but output isn't
     elif config['loss']=='l1':
         criterion = nn.L1Loss()             # like MSE but abs value
+    elif config['loss']=='smape':
+        criterion = SMAPELoss()             # supervised learning (Pixar paper)
     
     # Model Name
     date_str = datetime.now().strftime("%Y-%m-%d")

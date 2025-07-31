@@ -120,15 +120,11 @@ class ImageDataset(Dataset):
                 albedo_path = os.path.join(folder, albedo_file)
                 albedo_img = tifffile.imread(albedo_path)                                           # (H, W, 3)
                 albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()     # (3, H, W)
-                # albedo_min = albedo_tensor.amin(dim=(0,1), keepdim=True)
-                # albedo_max = albedo_tensor.amax(dim=(0,1), keepdim=True)
-                # albedo_tensor = (albedo_tensor - albedo_min) / (albedo_max - albedo_min + 1e-6)
                 self.albedo_images[key] = albedo_tensor
                 # NORMAL
                 normal_path = os.path.join(folder, normal_file)
                 normal_img = tifffile.imread(normal_path)                                           # (H, W, 3)
                 normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()     # (3, H, W)
-                normal_tensor = (normal_tensor + 1.0) * 0.5
                 self.normal_images[key] = normal_tensor
 
     def __len__(self):
@@ -156,11 +152,14 @@ class ImageDataset(Dataset):
 
         # INPUT FEATURES
         stats = generate_hist_statistics(input_samples)
-        input_tensor = stats['mean']                                # default input (3, H, W)
+        # input_tensor = stats['mean']                                # default input (3, H, W)
+        input_tensor = noisy_tensor.clone()
 
-        # TONEMAPPING (over the whole image because if done per crop could distort the values)
+        # TONEMAPPING + NORMALISATION
+        # (over the whole image because if done per crop could distort the values)
         input_tensor = apply_tonemap(input_tensor, tonemap="log") 
         albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
+        normal_tensor = (normal_tensor + 1.0) * 0.5
     
         # STATS (concatenate variance and std to input channels)
         if self.mode == "stat":
@@ -172,9 +171,10 @@ class ImageDataset(Dataset):
         if self.supervised:
             target_tensor = clean_tensor   
         else: 
-            target_tensor = target_sample.mean(axis=0)              # (3, H, W)
+            target_tensor = target_sample.mean(axis=0)                # (3, H, W)
+            # target_tensor= noisy_tensor                             # (3, H, W)
 
-        target_tensor = apply_tonemap(target_tensor, tonemap="reinhard_gamma")
+        # target_tensor = apply_tonemap(target_tensor, tonemap="none")
 
         # CROP
         if self.crop_size:
@@ -193,22 +193,11 @@ class ImageDataset(Dataset):
                 normal_tensor = normal_tensor[..., i:i+h, j:j+w]
 
         # NORMALISE BY MEAN PER CROP (after cropping)
+        # TODO: to be discarded --> currently unused
         crop_mean = input_tensor.mean(dim=(1,2), keepdim=True) + 1e-6  # avoid divide by zero
-        # input_tensor = input_tensor / crop_mean
-        # target_tensor = target_tensor / crop_mean
-        # noisy_tensor = noisy_tensor / crop_mean
-        # if clean_tensor is not None:
-        #     clean_tensor = clean_tensor / crop_mean
 
         # AOV
         if self.aov:
-            # NORMALISE
-            # Normals are in [-1,1], convert to [0,1] for visualization/storage
-            # normal_tensor = (normal_tensor + 1.0) * 0.5
-            # Albedo is in HDR due to noisy Mitsuba measurments so convert to [0, 1]
-            # albedo_min = albedo_tensor.amin(dim=(0,1), keepdim=True)
-            # albedo_max = albedo_tensor.amax(dim=(0,1), keepdim=True)
-            # albedo_tensor = (albedo_tensor - albedo_min) / (albedo_max - albedo_min + 1e-6)
             input_tensor = torch.cat([input_tensor, albedo_tensor, normal_tensor], dim=0)       # stat: (6 + 6, H, W) img: (3 + 6, H, W)
 
         # DATA AUGMENTATION: random horizontal/vertical flips
