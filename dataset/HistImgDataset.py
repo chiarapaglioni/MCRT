@@ -2,10 +2,11 @@ import os
 import torch
 import random
 import tifffile
+import torch.nn.functional as F
 from torchvision import transforms
 from torch.utils.data import Dataset
 # Utils
-from utils.utils import apply_tonemap
+from utils.utils import apply_tonemap, local_variance
 from dataset.HistogramGenerator import generate_histograms, generate_histograms_torch, generate_hist_statistics
 
 import logging
@@ -60,6 +61,7 @@ class ImageDataset(Dataset):
         self.normal_images = {}         # (scene) -> tensor (3, H, W)
         self.scene_paths = {}           # (scene) -> folder path
         self.scene_sample_indices = {}  # (scene) -> (list of input idx, target idx)
+        self.variance_heatmaps = {}     # (scene) -> torch.Tensor (H_patch, W_patch)
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
             os.makedirs(self.cached_dir)
@@ -129,6 +131,36 @@ class ImageDataset(Dataset):
                 normal_tensor = (normal_tensor + 1.0) * 0.5                                 # NORMALISATION
                 self.normal_images[key] = normal_tensor
 
+            # VARIANCE SAMPLING MAP
+            heatmap_path = os.path.join(folder, f"{key}_variance_heatmap.png")
+            sampling_map = local_variance(self.noisy_images[key], window_size=self.crop_size, save_path=heatmap_path, cmap='viridis')
+            self.variance_heatmaps[key] = sampling_map
+
+    def _get_crop_coords_from_variance(self, scene):
+        """
+        Sample a crop location weighted by local variance for the given scene.
+        """
+        varmap = self.variance_heatmaps[scene]  # (H, W)
+        H, W = varmap.shape
+        crop_H, crop_W = self.crop_size, self.crop_size
+
+        out_H = H - crop_H + 1
+        out_W = W - crop_W + 1
+
+        # Average variance over all valid crop positions
+        var_tensor = varmap.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+        crop_var = F.avg_pool2d(var_tensor, kernel_size=(crop_H, crop_W), stride=1).squeeze()  # (out_H, out_W)
+
+        # Normalize to sampling probabilities
+        probs = crop_var.flatten()
+        probs -= probs.min()
+        probs /= probs.sum() + 1e-8
+
+        idx = torch.multinomial(probs, 1).item()
+        i = idx // out_W
+        j = idx % out_W
+        return i, j, crop_H, crop_W
+
     def __len__(self):
         return self.virt_size
 
@@ -187,7 +219,8 @@ class ImageDataset(Dataset):
         # CROP
         if self.crop_size:
             if crop_coords is None:
-                i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
+                # i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
+                i, j, h, w = self._get_crop_coords_from_variance(scene)
             else:
                 i, j, h, w = crop_coords
             input_tensor = input_tensor[..., i:i+h, j:j+w]    # crop spatial dims

@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 # Models
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
+import torch.nn.functional as F
 
 # Logger
 import logging
@@ -510,3 +511,36 @@ def apply_tonemap(hdr_tensor, tonemap):
 
     else: 
         return hdr_tensor # no tonemapped applied
+
+
+def local_variance(image, window_size=16, save_path=None, cmap='viridis'):
+    """
+    Compute approximate local variance of an image using non-overlapping sliding windows.
+
+    Args:
+        image (Tensor): Input tensor of shape (3, H, W).
+        window_size (int): Size of the sliding window (patch size).
+        save_path (str, optional): If provided, saves a heatmap of the variance to this path.
+        cmap (str): Colormap used for the heatmap visualization.
+
+    Returns:
+        Tensor: Variance heatmap of shape (H_patch, W_patch).
+    """
+    luminance = image.mean(dim=0, keepdim=True)  # (1, H, W)
+    mean = F.avg_pool2d(luminance, window_size, stride=1, padding=window_size // 2)
+    mean_sq = F.avg_pool2d(luminance ** 2, window_size, stride=1, padding=window_size // 2)
+    var = mean_sq - mean ** 2  # (1, H, W)
+    var = var.squeeze(0)  # (H_patch, W_patch)
+
+    if save_path is not None:
+        var_norm = (var - var.min()) / (var.max() - var.min() + 1e-8)
+        plt.figure(figsize=(6, 6))
+        plt.imshow(var_norm.cpu(), cmap=cmap)
+        plt.colorbar(label='Local Variance')
+        plt.title("Local Variance Heatmap")
+        plt.axis('off')
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+
+    return var
