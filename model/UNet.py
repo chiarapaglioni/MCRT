@@ -97,9 +97,8 @@ class UpConv(nn.Module):
         return x
 
 class GapUNet(nn.Module):
-    def __init__(self, in_channels=3, n_bins=32, out_mode='mean',
-                 merge_mode='concat', depth=4, start_filters=64,
-                 mode='hist'):
+    def __init__(self, in_channels=3, n_bins_input=16, n_bins_output=16, out_mode='mean',
+                 merge_mode='concat', depth=4, start_filters=64, mode='hist'):
         """
         Args:
             in_channels: number of input color channels (usually 3)
@@ -115,7 +114,8 @@ class GapUNet(nn.Module):
         assert mode in ('hist', 'img'), "mode must be 'hist' or 'img'"
 
         self.out_mode = out_mode
-        self.n_bins = n_bins
+        self.n_bins_input = n_bins_input
+        self.n_bins_output = n_bins_output
         self.merge_mode = merge_mode
         self.depth = depth
         self.start_filters = start_filters
@@ -124,9 +124,10 @@ class GapUNet(nn.Module):
         # INPUT CHANNELS
         if self.mode == 'hist':
             if out_mode == 'dist':
-                self.input_channels = in_channels * n_bins          # original histogram
+                # self.input_channels = in_channels * self.n_bins_input       # original histogram
+                self.input_channels = in_channels * self.n_bins_input         # +3 for confidence
             elif out_mode == 'mean':
-                self.input_channels = in_channels * n_bins # (n_bins + 2)    # bins + mean + var
+                self.input_channels = in_channels * self.n_bins_input       # (n_bins + 2)    # bins + mean + var
             else:
                 raise ValueError(f"Unsupported out_mode: {out_mode}")
         else:  # 'img' mode
@@ -153,7 +154,7 @@ class GapUNet(nn.Module):
         if out_mode == 'mean':
             self.final = nn.Conv2d(start_filters, 3, kernel_size=1)
         elif out_mode == 'dist':
-            self.final = nn.Conv2d(start_filters, 3 * n_bins, kernel_size=1)
+            self.final = nn.Conv2d(start_filters, 3 * self.n_bins_output, kernel_size=1)
         else:
             raise ValueError("Invalid out_mode. Use 'mean' or 'dist'.")
 
@@ -190,6 +191,6 @@ class GapUNet(nn.Module):
 
         if self.out_mode == 'dist':
             B, _, H, W = out.shape
-            out = out.view(B, 3, self.n_bins, H, W)
+            out = out.view(B, 3, self.n_bins_output, H, W)
 
         return out

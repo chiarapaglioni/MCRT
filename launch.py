@@ -6,7 +6,7 @@ from utils.utils import setup_logger
 from renderer.RenderingPipeline import generate_data
 from dataset.HistogramLoader import test_data_loader
 from model.DenoisingPipeline import train_model, evaluate_model, evaluate_model_aov, benchmark_num_workers
-from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline, test_histogram_generator, train_histogram_residual
+from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline, test_histogram_generator
 
 logger = setup_logger()
 

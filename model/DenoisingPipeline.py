@@ -215,13 +215,14 @@ def train_model(config):
     # MODEL
     if model_cfg['model_name'] == 'gap':
         model = GapUNet(
-            in_channels=model_cfg['in_channels'],
-            n_bins=dataset_cfg['hist_bins'],
-            out_mode=model_cfg['out_mode'],
-            merge_mode=model_cfg['merge_mode'],
-            depth=model_cfg['depth'],
-            start_filters=model_cfg['start_filters'],
-            mode=dataset_cfg['mode']
+            in_channels=model_cfg["in_channels"],
+            n_bins_input=model_cfg["n_bins_input"],
+            n_bins_output=dataset_cfg['hist_bins'],
+            out_mode=model_cfg["out_mode"],
+            merge_mode=model_cfg["merge_mode"],
+            depth=model_cfg["depth"],
+            start_filters=model_cfg["start_filters"],
+            mode=dataset_cfg["mode"]
         ).to(device)
 
     elif model_cfg['model_name'] == 'n2n':

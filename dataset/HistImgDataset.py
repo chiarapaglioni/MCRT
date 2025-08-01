@@ -199,8 +199,8 @@ class ImageDataset(Dataset):
         # INPUT 
         if self.mode == "stat":
             # INPUT FEATURES
-            rgb_stats = generate_hist_statistics(spp1_patch[input_idx])   # STACK tensor
-            # rgb_stats = generate_hist_statistics(noisy_patch)           # NOISY tensor
+            rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='luminance')    # STACK tensor
+            # rgb_stats = generate_hist_statistics(noisy_patch)                                         # NOISY tensor
 
             mean_img = rgb_stats['mean']                                        # (3, H, W)
             mean_img = apply_tonemap(mean_img, tonemap="log") 
@@ -269,7 +269,6 @@ class ImageDataset(Dataset):
             "scene": patch.get("scene", None),
             "crop_coords": patch.get("crop_coords", None),
         }
-
 
 
 # IMAGE DENOISING - CROP HISTOGRAM DATASET
@@ -476,7 +475,6 @@ class CropHistogramDataset(Dataset):
             "bin_edges": bin_edges_tensor,
             "crop_coords": (i, j, h, w) if self.crop_size else None,              
         }
-    
 
 
 # GENERATIVE ACCUMULATION - HISTOGRAM BINOM DATASET
@@ -487,7 +485,7 @@ class HistogramBinomDataset(Dataset):
                  high_spp: int = 4500, cached_dir: str = None,
                  debug: bool = False, mode: str = None, device: str = None,
                  hist_regeneration: bool = False, scene_names=None, 
-                 target_sample: int = 1):
+                 target_sample: int = 1, stat: bool = True):
         
         self.root_dir = root_dir
         self.crop_size = crop_size
@@ -495,6 +493,7 @@ class HistogramBinomDataset(Dataset):
         self.virt_size = virt_size
         self.hist_bins = hist_bins
         self.clean = clean
+        self.stat = stat
         self.low_spp = low_spp
         self.high_spp = high_spp
         self.cached_dir = cached_dir
@@ -587,45 +586,57 @@ class HistogramBinomDataset(Dataset):
 
     def __getitem__(self, idx, crop_coords=None):
         scene = self.scene_names[idx % len(self.scene_names)]
-        hist = self.hist_features[scene]
-        clean_tensor = self.clean_images[scene]
+        hist = self.hist_features[scene]                      # shape: (3, H, W, B)
+        clean_tensor = self.clean_images[scene]               # shape: (3, H, W)
+        spp1_samples = self.spp1_images[scene]                # shape: (N, 3, H, W)
         bin_edges_tensor = self.bin_edges[scene]
         bin_weights_tensor = self.bin_weights
 
-        # Step 2.1: Randomize target_sample each time (e.g., pick between 2 and 30)
-        target_sample = random.choice([2, 4, 8, 12, 16, 20, 24, 28, 30])
+        # CROP
+        if self.crop_size:
+            _, H, W, _ = hist.shape
+            if crop_coords is None:
+                i, j, h, w = transforms.RandomCrop.get_params(torch.empty((H, W)), output_size=(self.crop_size, self.crop_size))
+            else:
+                i, j, h, w = crop_coords
+            hist = hist[:, i:i+h, j:j+w, :]                   # (3, H, W, B)
+            clean_tensor = clean_tensor[:, i:i+h, j:j+w]      # (3, H, W)
+            spp1_samples = spp1_samples[:, :, i:i+h, j:j+w]   # (3, H, W, B)
 
-        # Step 2.2: Compute binomial sampling probability
-        p = torch.tensor(min(target_sample / (self.low_spp + 1e-8), 1.0))
 
-        # Step 2.3: Generate binomial input and target histograms
-        binom = torch.distributions.Binomial(total_count=hist, probs=p)
+        # Randomize target_sample each time (currently discarded because it adds more noise)
+        # target_sample = random.choice([8, 12, 16, 20, 24])
+        target_sample = 16
+        p = torch.tensor(min(target_sample / (self.low_spp + 1e-8), 1.0))       # Compute binomial sampling probability
+        binom = torch.distributions.Binomial(total_count=hist, probs=p)         # Generate binomial input and target histograms
         target_hist = binom.sample()
         input_hist = hist - target_hist
 
         # NORMALISATION
-        target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)          # shape (H, W, 3, B)
-        input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)             # shape (H, W, 3, B)
+        target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)          # shape (3, H, W, B)
+        input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)             # shape (3, H, W, B)
 
-        input_tensor = input_hist.permute(2, 3, 0, 1).contiguous().float()                  # shape (3, B, H, W)
-        target_tensor = target_hist.permute(2, 3, 0, 1).contiguous().float()                # shape (3, B, H, W)
+        input_tensor = input_hist.permute(0, 3, 1, 2).contiguous().float()                  # shape (3, B, H, W)
+        target_tensor = target_hist.permute(0, 3, 1, 2).contiguous().float()                # shape (3, B, H, W)
 
-        if self.crop_size:
-            if crop_coords is None:
-                i, j, h, w = transforms.RandomCrop.get_params(target_tensor, output_size=(self.crop_size, self.crop_size))
-            else:
-                i, j, h, w = crop_coords
-            
-            input_tensor = input_tensor[:, :, i:i+h, j:j+w]
-            target_tensor = target_tensor[:, :, i:i+h, j:j+w]
-            clean_tensor = clean_tensor[:, i:i+h, j:j+w]
+        # MEAN and RELATIVE VARIANCE from samples
+        if self.stat:
+            stats = generate_hist_statistics(spp1_samples, return_channels='all')
+            pixel_mean = stats['mean']                                                      # (3, H, W)
+            rel_var = stats['relative_variance']                                            # (3, H, W)
 
+            pixel_mean_expanded = pixel_mean.unsqueeze(1)                                   # (3, 1, H, W)
+            rel_var_expanded = rel_var.unsqueeze(1)                                         # (3, 1, H, W)
+
+            input_tensor = torch.cat([input_tensor, pixel_mean_expanded, rel_var_expanded], dim=1)   # (3, B+2, H, W)
+
+
+        # DATA AUGMENTATION
         if self.data_augmentation:
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-1])
                 target_tensor = torch.flip(target_tensor, dims=[-1])
                 clean_tensor = torch.flip(clean_tensor, dims=[-1])
-
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-2])
                 target_tensor = torch.flip(target_tensor, dims=[-2])
@@ -642,24 +653,26 @@ class HistogramBinomDataset(Dataset):
         }
 
 
-
 # GENERATIVE ACCUMULATION - CROP HISTOGRAM BINOM DATASET
-# gives better results as the range is more restricted so more balanced histogram for 128x128 crops and 16 bins
 class CropHistogramBinomDataset(Dataset):
+    """"
+        Gives better results as the range is more restricted so more balanced histogram for 128x128 crops and 16 bins
+        BUT more difficul for model to learn as range chanegs for very crop
+    """
     def __init__(self, root_dir: str, crop_size: int = 128,
                  data_augmentation: bool = True, virt_size: int = 1000,
                  hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
                  high_spp: int = 4500, cached_dir: str = None,
                  debug: bool = False, mode: str = None, device: str = None,
                  hist_regeneration: bool = False, scene_names=None, 
-                 target_sample: int = 1):
-        
+                 target_sample: int = 1, stat: bool = True):
         self.root_dir = root_dir
         self.crop_size = crop_size
         self.data_augmentation = data_augmentation
         self.virt_size = virt_size
         self.hist_bins = hist_bins
         self.clean = clean
+        self.stat = stat
         self.low_spp = low_spp
         self.high_spp = high_spp
         self.cached_dir = cached_dir
@@ -726,23 +739,21 @@ class CropHistogramBinomDataset(Dataset):
             # Split spp1 samples into input and target sets
             assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 
-
     def __len__(self):
         return self.virt_size
 
     def __getitem__(self, idx, crop_coords=None):
         scene = self.scene_names[idx % len(self.scene_names)]
-        clean_tensor = self.clean_images[scene]
+        clean_tensor = self.clean_images[scene]                 # (3, H, W)
         spp1_samples = self.spp1_samples[scene]                 # (low_spp, H, W, 3)
 
         # CROP
-        # TODO: currently getting dimensions from clean image so that can't be none!!! may cause exceptions
         if self.crop_size:
+            _, H, W, _ = spp1_samples.shape
             if crop_coords is None:
-                i, j, h, w = transforms.RandomCrop.get_params(clean_tensor, output_size=(self.crop_size, self.crop_size))
+                i, j, h, w = transforms.RandomCrop.get_params(torch.empty((H, W)), output_size=(self.crop_size, self.crop_size))
             else:
                 i, j, h, w = crop_coords
-            
             spp1_samples = spp1_samples[:, i:i+h, j:j+w, :]    # (low_spp, crop_H, crop_W, 3)
             clean_tensor = clean_tensor[:, i:i+h, j:j+w]
 
@@ -750,25 +761,42 @@ class CropHistogramBinomDataset(Dataset):
         hist, bin_edges_tensor = generate_histograms_torch(spp1_samples, self.hist_bins, self.device, log_binning=True)
 
         # BINOMIAL SPLIT
-        target_sample = random.choice([2, 4, 8, 12, 16, 20, 24, 28, 30])
+        # target_sample = random.choice([4, 8, 12, 16, 20])                     
+        # discarded because even if it augments it confuses the model (uncomment if confidence is added)
+        target_sample = 16
         p = torch.tensor(min(target_sample / (self.low_spp + 1e-8), 1.0))       # Binom Probability 
         binom = torch.distributions.Binomial(total_count=hist, probs=p)         # Binom Sampling
         target_hist = binom.sample()
         input_hist = hist - target_hist
 
-        # NORMALISATION
-        target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)          # shape (H, W, 3, B)
-        input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)             # shape (H, W, 3, B)
+        # CONFIDENCE: number of samples = "how much to trust the network" (DISCARDED because not using random target samples)
+        confidence = input_hist.sum(dim=-1)  # shape: (H, W, 3)
 
-        input_tensor = input_hist.permute(2, 3, 0, 1).contiguous().float()                  # shape (3, B, H, W)
-        target_tensor = target_hist.permute(2, 3, 0, 1).contiguous().float()                # shape (3, B, H, W)
+        # NORMALIZATION
+        target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)
+        input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)
+        input_tensor = input_hist.permute(2, 3, 0, 1).contiguous().float()      # (3, B, H, W)
+        target_tensor = target_hist.permute(2, 3, 0, 1).contiguous().float()    # (3, B, H, W)
 
+        # Add confidence as an extra channel per RGB component
+        # confidence = confidence.permute(2, 0, 1).unsqueeze(1)                    # (3, 1, H, W)
+        # input_tensor = torch.cat([input_tensor, confidence], dim=1)              # (3, B+1, H, W) --> across bins may ruin model predictions because it sees confidence as extra counts
+
+        # MEAN
+        # Compute mean image from input samples (excluding target_sample)
+        if self.stat:
+            input_sample_count = self.low_spp - self.target_sample
+            input_samples = spp1_samples[:input_sample_count]  # (N, H, W, 3)
+            mean_img = input_samples.mean(dim=0).permute(2, 0, 1).float()  # (3, H, W)
+            mean_img = mean_img.unsqueeze(1)  # (3, 1, H, W)
+            input_tensor = torch.cat([input_tensor, mean_img], dim=1)  # (3, B+1, H, W)
+
+        # DATA AUMENTATION
         if self.data_augmentation:
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-1])
                 target_tensor = torch.flip(target_tensor, dims=[-1])
                 clean_tensor = torch.flip(clean_tensor, dims=[-1])
-
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-2])
                 target_tensor = torch.flip(target_tensor, dims=[-2])

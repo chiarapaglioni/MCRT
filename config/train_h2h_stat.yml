@@ -10,14 +10,14 @@ dataset:
   virt_size: 1000                       # number of crops to generate across all the scenes
   clean: true                           # whether to include 'clean' targets if available
   debug: true                           # saves plot to output save_dir for debugging
-  stat: false                           # wether to include mean and var value alongside histogram (helps with colour reconstruction)
+  stat: true                            # whether to include mean and var value alongside histogram (helps with colour reconstruction)
   hist_regeneration: false
-  target_sample: 16                              
+  target_sample: 16
 
 model:
   model_name: gap
   in_channels: 3                        # 3 by default
-  n_bins_input: 16                      # hist_bins if only using hist, else 18 if using other stats
+  n_bins_input: 18                      # hist_bins if only using hist, else 18 if using other stats
   out_mode: dist                        # 'mean' or 'dist' to output RGB image or distrbution
   merge_mode: concat                    # 'add' or 'concat'
   depth: 5                              # number of encoder/decoder blocks
@@ -35,5 +35,5 @@ val_split: 0.1                          # 10% validation split
 
 # training
 num_epochs: 100
-plot_every: 1                          # how often to save the debug plots
+plot_every: 10                          # how often to save the debug plots
 save_dir: checkpoints

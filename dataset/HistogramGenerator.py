@@ -162,17 +162,18 @@ def generate_histograms_torch(samples, num_bins, device=None, debug=False, log_b
         bin_edges = torch.logspace(torch.log10(torch.tensor(max(min_val, 1e-4))), torch.log10(torch.tensor(max_val)), steps=num_bins + 1, device=samples.device)
     else:
         bin_edges = torch.linspace(min_val, max_val, num_bins + 1, device=samples.device)
-
+    
+    samples = samples.contiguous()
     hist = accumulate_histogram_gpu(samples, bin_edges, num_bins)
     return hist, bin_edges
 
 
-def generate_hist_statistics(samples, device=None):
+def generate_hist_statistics(samples, return_channels='luminance'):
     """
     Compute mean and relative luminance variance of radiance per pixel.
 
     Args:
-        samples (torch.Tensor): Shape (N, H, W, 3), input radiance samples
+        samples (torch.Tensor): Shape (N, 3, H, W), input radiance samples
         device (str or torch.device, optional): Compute device (CPU or CUDA)
 
     Returns:
@@ -188,10 +189,15 @@ def generate_hist_statistics(samples, device=None):
     relative_var = var / (mean ** 2 + epsilon)          # (3, H, W)
 
     # Luminance conversion (standard Rec.709)
-    rel_var_lum = (
-        0.2126 * relative_var[0, ...] +
-        0.7152 * relative_var[1, ...] +
-        0.0722 * relative_var[2, ...]
-    ).unsqueeze(-1)  # (H, W, 1)
+    if return_channels == 'luminance':
+        # Luminance conversion (standard Rec.709)
+        rel_var_lum = (
+            0.2126 * relative_var[0, ...] +
+            0.7152 * relative_var[1, ...] +
+            0.0722 * relative_var[2, ...]
+        ).unsqueeze(0)                                  # (1, H, W)
+        relative_variance = rel_var_lum
+    else:
+        relative_variance = relative_var                # (3, H, W)
 
-    return {'mean': mean, 'relative_variance': rel_var_lum}
+    return {'mean': mean, 'relative_variance': relative_variance}

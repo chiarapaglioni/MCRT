@@ -60,11 +60,19 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Training - Generative - H2H",
+            "name": "Training - Generative - H2H (IMG)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
             "args": ["train_gen", "--config", "config/train_h2h.yml"],
+            "console": "integratedTerminal"
+        },
+                {
+            "name": "Training - Generative - H2H (STAT)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["train_gen", "--config", "config/train_h2h_stat.yml"],
             "console": "integratedTerminal"
         },
         {
