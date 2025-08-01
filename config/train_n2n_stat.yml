@@ -2,8 +2,8 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 10                     # num of crops per scene to generate
-  use_cached_crops: true
+  crops_per_scene: 100                    # num of crops per scene to generate
+  use_cached_crops: false
   low_spp: 32
   high_spp: 4500
   hist_bins: 16

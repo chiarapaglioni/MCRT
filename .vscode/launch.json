@@ -28,11 +28,19 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Training - Denoising - N2N",
+            "name": "Training - Denoising - N2N (IMG)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
             "args": ["train", "--config", "config/train_n2n.yml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Training - Denoising - N2N (STAT)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["train", "--config", "config/train_n2n_stat.yml"],
             "console": "integratedTerminal"
         },
         {

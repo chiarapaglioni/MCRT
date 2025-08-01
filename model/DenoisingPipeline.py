@@ -76,7 +76,7 @@ def get_data_loaders(config, run_mode="train"):
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
     if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
-        full_dataset = ImageDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        full_dataset = ImageDataset(**dataset_cfg, run_mode=run_mode)
     elif dataset_cfg['mode']=='hist':
         full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
 
