@@ -272,7 +272,7 @@ def train_model(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], epoch=epoch, debug=dataset_cfg['debug'])
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
         val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'])
 
         train_losses.append(train_loss)

@@ -24,7 +24,7 @@ model:
   start_filters: 32
   learning_rate: 1e-4
 
-# General DataLoader settings
+# DATALOADER
 batch_size: 16
 num_workers: 4
 shuffle: true
@@ -33,7 +33,7 @@ crop: false                             # whether to compute bin edges per crop 
 
 val_split: 0.1                          # 10% validation split
 
-# training
+# TRAINING
 num_epochs: 100
 plot_every: 1                          # how often to save the debug plots
 save_dir: checkpoints
