@@ -15,6 +15,7 @@ from datetime import datetime
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
 from dataset.HistImgDataset import ImageDataset, HistogramDataset
+from dataset.HistogramPatchAggregator import HistogramPatchAggregator
 from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
 # Logger
@@ -172,14 +173,16 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, 
 
 
 # VALIDATION STEP
-def validate_epoch(model, dataloader, criterion, device, tonemap, mode):
+def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, plot_every_n, debug=False):
     model.eval()
     total_loss = 0
     total_psnr = 0
     count = 0
 
+    aggregator = HistogramPatchAggregator(patch_size=5, stride=2, top_k=8, temperature=0.1).to(device)
+
     with torch.no_grad():
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
             hdr_input = batch['input'].to(device)           # B, 3, H, W
             hdr_target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)               # B, 3, H, W
@@ -189,6 +192,9 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode):
                 x_hist = hdr_input[:, :3*16]                        # (B, 48, H, W)
                 x_spatial = hdr_input[:, 3*16:, :, :]               # (B, 6, H, W)
                 pred = model(x_spatial, x_hist)                     # B, 3, H, W (HDR space)
+
+                # PATCH AGGREGATOR
+                pred = aggregator(pred, batch['input'][:, 3:, :, :])
             else:
                 pred = model(hdr_input)                             # B, 3, H, W (HDR space)
 
@@ -201,6 +207,10 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode):
 
                 total_psnr += compute_psnr(apply_tonemap(pred_i_hdr, tonemap=tonemap), apply_tonemap(clean_i_hdr, tonemap=tonemap))
                 count += 1
+
+            # DEBUG (plot the first batch)
+            if debug and batch_idx==0 and epoch is not None and (epoch % plot_every_n):
+                plot_debug_images(batch, preds=pred[0], epoch=epoch, batch_idx=batch_idx, correct=True)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count
@@ -294,7 +304,7 @@ def train_model(config):
         start_time = time.time()
 
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
-        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"])
+        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
