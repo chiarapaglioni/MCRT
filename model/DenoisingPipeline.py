@@ -237,7 +237,7 @@ def train_model(config):
         ).to(device)
 
     elif model_cfg['model_name'] == 'n2n':
-        if model_cfg["mode"] == "hist":
+        if dataset_cfg["mode"] == "hist":
             model = N2Net(
                 in_channels=model_cfg["in_channels"],       # total channels: histogram + spatial
                 hist_bins=dataset_cfg["hist_bins"],         # how many bins per channel
@@ -293,8 +293,8 @@ def train_model(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], mode=model_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
-        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=model_cfg["mode"])
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
+        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"])
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -332,7 +332,7 @@ def evaluate_model(config):
     model_cfg = config['model']
 
     # TODO: implement smart selection of the datsets
-    hist_dataset = CropHistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
+    hist_dataset = HistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
     img_dataset = ImageDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
     # img_dataset = ImageDataset(**{**dataset_cfg, "mode": "stat"}, run_mode="test")
 

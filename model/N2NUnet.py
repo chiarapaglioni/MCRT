@@ -33,11 +33,14 @@ class N2Net(nn.Module):
 
         # Dynamic input channel size based on mode
         if self.mode == "hist":
-            self.spatial_in_channels = in_channels - (3 * hist_bins) + self.hist_encoder_out_channels
-            self.hist_encoder = HistogramEncoder(bins_per_channel=hist_bins,
-                                                 out_features=self.hist_encoder_out_channels)
+            hist_channels = 3 * hist_bins
+            self.spatial_in_channels = in_channels - hist_channels
+            self.hist_encoder = HistogramEncoder(bins_per_channel=hist_bins, out_features=self.hist_encoder_out_channels)
+            logger.info(f"Hist input_channels={hist_channels}")
         else:
             self.spatial_in_channels = in_channels  # full input is spatial
+
+        logger.info(f"Spatial input_channels={self.spatial_in_channels}")
 
         # ---- Dynamic base width ----
         self.base_width = 48 if self.spatial_in_channels <= 15 else int(self.spatial_in_channels * 1.5)
@@ -45,10 +48,14 @@ class N2Net(nn.Module):
         bw = self.base_width
         bw2 = bw * 2
 
+        # Change encoder/decoder input channels based on the mode!
         first_encoder_input_channels = (
             self.spatial_in_channels + self.hist_encoder_out_channels
             if self.mode == "hist"
             else self.spatial_in_channels
+        )
+        first_decoder_input_channels = bw2 + (
+            (self.spatial_in_channels + self.hist_encoder_out_channels) if self.mode == "hist" else in_channels
         )
 
         # ---- ENCODER ----
@@ -101,7 +108,7 @@ class N2Net(nn.Module):
         )
 
         self.dec_conv1abc = nn.Sequential(
-            ConvBlockLeakyRelu(bw2 + in_channels, final_bw, 3, stride=1, padding=1),
+            ConvBlockLeakyRelu(first_decoder_input_channels, final_bw, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(final_bw, final_bw // 2, 3, stride=1, padding=1),
             nn.Conv2d(final_bw // 2, 3, 3, stride=1, padding=1, bias=True)
         )
@@ -111,8 +118,9 @@ class N2Net(nn.Module):
     def forward(self, x, x_hist=None):
         if self.mode == "hist":
             assert x_hist is not None, "x_hist must be provided in histogram mode"
-            hist_encoded = self.hist_encoder(x_hist)  # shape: (C, H, W)
-            x = torch.cat([x, hist_encoded], dim=1)
+            hist_encoded = self.hist_encoder(x_hist)                # shape: (C, H, W)
+            spatial_x = x[:, :self.spatial_in_channels, :, :]
+            x = torch.cat([spatial_x, hist_encoded], dim=1)
 
         residual_connection = [x]
 

@@ -168,9 +168,9 @@ class ImageDataset(Dataset):
                 elapsed = time.time() - start_time
                 logger.info(f"Finished generating {self.crops_per_scene} crops for scene '{key}' in {elapsed:.2f} seconds!")
 
-                if self.cached_dir:
-                    save_patches(scene_patches, patch_cache_path)
-                    logger.info(f"Saved {len(scene_patches)} patches to {patch_cache_path}")
+                # if self.cached_dir:
+                #     save_patches(scene_patches, patch_cache_path)
+                #     logger.info(f"Saved {len(scene_patches)} patches to {patch_cache_path}")
 
             self.patches.extend(scene_patches)
 
@@ -412,8 +412,8 @@ class HistogramDataset(Dataset):
                     "coords": (i, j, h, w)
                 })
 
-            if self.cached_dir:
-                save_patches(scene_patches, patch_cache_path)
+            # if self.cached_dir:
+            #     save_patches(scene_patches, patch_cache_path)
             self.patches.extend(scene_patches)
 
         logger.info(f"Total patches: {len(self.patches)}")
