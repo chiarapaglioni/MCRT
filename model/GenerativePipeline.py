@@ -115,7 +115,6 @@ def get_generative_dataloaders(config, device):
 
 def count_bin0_only_histograms(input_hist, title):
     # input_hist: shape (B, C, bins, H, W)
-
     bins = input_hist.shape[2]
     device = input_hist.device
 
@@ -316,6 +315,7 @@ def run_generative_accumulation_pipeline(config):
     # Config
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
+    plot_every = config.get("plot_every", 1)  # plot every N steps, default to every step
 
     # Dataset
     if config['crop']:
@@ -341,65 +341,83 @@ def run_generative_accumulation_pipeline(config):
         clean_img = batch["clean"].to(device)
         input_hist = batch["input_hist"].to(device)  # normalized histogram
 
-        # Restore raw count scale
-        total_init_counts = dataset_cfg['low_spp'] - dataset_cfg['target_sample']
-        current_hist = input_hist * total_init_counts
+        B, C, n_bins, H, W = input_hist.shape
 
-        # Track photon count for normalization
-        photon_count = torch.full_like(current_hist[:, :, :1], total_init_counts)  # shape (B, C, 1, H, W)
+        # Initialize histogram and photon count based on start_from option
+        if config.get("start_from", "noisy") == "empty":
+            current_hist = torch.zeros_like(input_hist)
+            photon_count = torch.zeros_like(current_hist[:, :, :1])  # (B,C,1,H,W)
+        else:
+            total_init_counts = dataset_cfg['low_spp'] - dataset_cfg['target_sample']
+            current_hist = input_hist * total_init_counts
+            photon_count = torch.full_like(current_hist[:, :, :1], total_init_counts)
 
         imgs_to_show = []
+        steps_to_plot = []
 
         with torch.no_grad():
-            for _ in range(num_steps):
-                # Normalize before feeding into model
+            for step in range(num_steps):
                 normalized_hist = current_hist / photon_count.clamp(min=1e-6)
 
                 logits = model(normalized_hist)
                 probs = torch.softmax(logits, dim=2)
 
-                # Sample one bin per pixel
                 B, C, n_bins, H, W = probs.shape
                 probs_flat = probs.permute(0, 1, 3, 4, 2).reshape(-1, n_bins)
-                sampled_bins = torch.multinomial(probs_flat, num_samples=1).squeeze(1)                      # kind of random can go to wrong bins
-                # sampled_bins = torch.argmax(probs, dim=2)  # shape: (B, C, H, W)                          # goes to most probabable bin (wrong, too deterministic)
+                sampled_bins = torch.multinomial(probs_flat, num_samples=1).squeeze(1)
                 sampled_one_hot = torch.nn.functional.one_hot(sampled_bins, num_classes=n_bins).float()
 
-                # Reshape back to histogram format
                 sampled_hist = sampled_one_hot.view(B, C, H, W, n_bins).permute(0, 1, 4, 2, 3).contiguous()
 
-                # Accumulate photon count
                 current_hist += sampled_hist
-                photon_count += 1.0  # adding one photon per pixel
+                photon_count += 1.0
 
-                # Decode to RGB using normalized histogram
-                normalized_hist = current_hist / photon_count.clamp(min=1e-6)
-                pred_rgb = decode_image_from_probs(normalized_hist, bin_edges)
-                imgs_to_show.append(pred_rgb[0].cpu())
+                # Plot only every N iterations
+                if (step % plot_every) == 0:
+                    normalized_hist = current_hist / photon_count.clamp(min=1e-6)
+                    pred_rgb = decode_image_from_probs(normalized_hist, bin_edges)
+                    imgs_to_show.append(pred_rgb[0].cpu())
+                    steps_to_plot.append(step+1)
 
-        total_plots = num_steps + 1
+        # Include final step if not included yet
+        if (num_steps - 1) % plot_every != 0:
+            normalized_hist = current_hist / photon_count.clamp(min=1e-6)
+            pred_rgb = decode_image_from_probs(normalized_hist, bin_edges)
+            imgs_to_show.append(pred_rgb[0].cpu())
+            steps_to_plot.append(num_steps)
+
+        total_plots = len(imgs_to_show) + 1  # plus ground truth
         cols = min(6, total_plots)
         rows = (total_plots + cols - 1) // cols
 
         plt.figure(figsize=(4 * cols, 4 * rows))
-        for i, img in enumerate(imgs_to_show):
-            psnr_val = compute_psnr(img, clean_img[0])
+
+        for i, (img, step_num) in enumerate(zip(imgs_to_show, steps_to_plot)):
             plt.subplot(rows, cols, i + 1)
             plt.imshow(img.permute(1, 2, 0))
-            plt.title(f"Step {i+1} - PSNR {psnr_val:.2f}")
+
+            # Only compute and show PSNR if starting from noisy histogram
+            if config.get("start_from", "noisy") == "noisy":
+                psnr_val = compute_psnr(img, clean_img[0])
+                plt.title(f"Step {step_num} - PSNR {psnr_val:.2f}")
+            else:
+                plt.title(f"Step {step_num}")
+
             plt.axis("off")
 
         # Ground Truth
-        plt.subplot(rows, cols, total_plots)
-        plt.imshow(clean_img[0].permute(1, 2, 0).cpu())
-        plt.title("Ground Truth Image")
-        plt.axis("off")
+        if config.get("start_from", "noisy") == "noisy":
+            plt.subplot(rows, cols, total_plots)
+            plt.imshow(clean_img[0].permute(1, 2, 0).cpu())
+            plt.title("Ground Truth Image")
+            plt.axis("off")
 
         plt.tight_layout()
         save_path = output_dir / f"sample_{idx}_progressive_generation.png"
         plt.savefig(save_path)
         plt.show(block=True)
         print(f"Saved progressive generation plot to {save_path}")
+
 
 
 # ADDS RESIDUAL ITERATIVELLY TO RECOVER CLEAN IMAGE
