@@ -325,7 +325,7 @@ def run_generative_accumulation_pipeline(config):
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
 
     # Load model
-    model = load_model(model_cfg, config['model_path'], mode="hist", device=device)
+    model = load_model(model_cfg, dataset_cfg, config['model_path'], device=device)
 
     output_dir = Path(config.get("output_dir", "plots"))
     output_dir.mkdir(exist_ok=True, parents=True)
