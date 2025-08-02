@@ -1,41 +1,41 @@
 dataset:
   root_dir: output                        # Raw dataset location
-  cached_dir: histograms                  # Cached histograms are saved
+  cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
+  crops_per_scene: 10                     # num of crops per scene to generate
+  use_cached_crops: true
   low_spp: 32
   high_spp: 4500
   hist_bins: 16
-  mode: hist                              # Options: 'hist' for hist2noise or 'img' for noise2noise
-  data_augmentation: true
-  virt_size: 3000
+  mode: hist                              # 'hist' for hist2noise or 'img' or 'stat' for noise2noise
+  data_augmentation: true                 # horizontal and vertical flips
   clean: true                             # Whether to include 'clean' targets if available
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
   debug: true                             # if true saves one plot per epoch in a debug plot folder
-  hist_regeneration: true
   supervised: false                       # if true supervised else self supervised
   tonemap: none                           # 'log' or 'reinhard' or 'reinhard_gamma' or 'none'
   target_split: 16
 
 model:
-  model_name: n2n
-  in_channels: 54                         # 3 * hist_bins + 6
-  out_mode: mean                          # 'mean' or 'dist'
-  merge_mode: concat                      # 'add' or 'concat'
-  depth: 4
-  start_filters: 48  
+  model_name: n2n                       # 'gap' or 'n2n'
+  in_channels: 58                       # 58 with AOV and stats
+  out_mode: mean                        # 'mean' or 'dist'
+  merge_mode: concat                    # 'add' or 'concat'
+  depth: 4                              # only for GAP model
+  start_filters: 48                     # only for GAP model
   learning_rate: 1e-4
 
 # General DataLoader settings
-batch_size: 16
-num_workers: 8                            # 4 on CPU or 8 on GPU
+batch_size: 12                          # minibatch: 8, 12, or 16
+num_workers: 4                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
-standardisation: global
-loss: mse                                 # 'rmse' or 'lhdr' when output is not tonemapped
+standardisation: global                  # if 'global' print dataset mean and std
+loss: smape                              # 'mse' or 'l1' or 'rmse' or 'lhdr' or 'smape'
 
-val_split: 0.1                            # 10% validation split
+val_split: 0.1                           # 10% validation split
 
 # training
 num_epochs: 100
-save_dir: checkpoints
-input_tonemap: none
+save_dir: checkpoints                    # where to save the models
+input_tonemap: none                      # what tone mapping to apply in the loss

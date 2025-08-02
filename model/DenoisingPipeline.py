@@ -14,7 +14,7 @@ from datetime import datetime
 # Custom
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
-from dataset.HistImgDataset import ImageDataset, CropHistogramDataset
+from dataset.HistImgDataset import ImageDataset, HistogramDataset
 from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
 
 # Logger
@@ -78,7 +78,7 @@ def get_data_loaders(config, run_mode="train"):
     if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
         full_dataset = ImageDataset(**dataset_cfg, run_mode=run_mode)
     elif dataset_cfg['mode']=='hist':
-        full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode=run_mode)
+        full_dataset = HistogramDataset(**dataset_cfg, run_mode=run_mode)
 
     # Split into train/val
     val_ratio = config.get('val_split', 0.1)

@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 # Datasets
-from dataset.HistImgDataset import CropHistogramDataset, CropHistogramBinomDataset
+from dataset.HistImgDataset import HistogramDataset, CropHistogramBinomDataset
 
 # Logger
 import logging
