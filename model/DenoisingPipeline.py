@@ -16,7 +16,7 @@ from model.UNet import GapUNet
 from model.N2NUnet import N2Net
 from dataset.HistImgDataset import ImageDataset, HistogramDataset
 from dataset.HistogramPatchAggregator import HistogramPatchAggregator
-from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap
+from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap, plot_debug_aggregation
 
 # Logger
 import logging
@@ -166,7 +166,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, 
         total_loss += loss.item()
 
         # DEBUG (plot the first batch)
-        if debug and batch_idx==0 and epoch is not None and (epoch % plot_every_n):
+        if debug and batch_idx==0 and epoch is not None and (epoch % plot_every_n) == 0:
             plot_debug_images(batch, preds=pred_tonamepped[0], epoch=epoch, batch_idx=batch_idx, correct=True)
 
     return total_loss / len(dataloader)
@@ -179,7 +179,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
     total_psnr = 0
     count = 0
 
-    aggregator = HistogramPatchAggregator(patch_size=5, stride=2, top_k=8, temperature=0.1).to(device)
+    aggregator = HistogramPatchAggregator().to(device)
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -193,8 +193,9 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
                 x_spatial = hdr_input[:, 3*16:, :, :]               # (B, 6, H, W)
                 pred = model(x_spatial, x_hist)                     # B, 3, H, W (HDR space)
 
-                # PATCH AGGREGATOR
-                pred = aggregator(pred, batch['input'][:, 3:, :, :])
+                # HIST AGGREGATOR
+                pre_agg_pred = model(x_spatial, x_hist)       # Save pre-aggregated output
+                pred = aggregator(pre_agg_pred, x_spatial)    # Use spatial only as reference
             else:
                 pred = model(hdr_input)                             # B, 3, H, W (HDR space)
 
@@ -209,8 +210,8 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
                 count += 1
 
             # DEBUG (plot the first batch)
-            if debug and batch_idx==0 and epoch is not None and (epoch % plot_every_n):
-                plot_debug_images(batch, preds=pred[0], epoch=epoch, batch_idx=batch_idx, correct=True)
+            if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
+                plot_debug_aggregation(pre_agg_pred, pred, tonemap, epoch)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count

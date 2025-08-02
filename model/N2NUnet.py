@@ -52,11 +52,7 @@ class N2Net(nn.Module):
             self.mod_enc_conv2 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
 
         # Change encoder/decoder input channels based on the mode!
-        first_encoder_input_channels = (
-            self.spatial_in_channels + self.hist_encoder_out_channels
-            if self.mode == "hist"
-            else self.spatial_in_channels
-        )
+        first_encoder_input_channels = self.spatial_in_channels
         first_decoder_input_channels = bw2 + self.spatial_in_channels
 
         # ---- ENCODER ----
