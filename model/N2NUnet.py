@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from model.HistogramEncoder import HistogramEncoder
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class ConvBlockLeakyRelu(nn.Module):
@@ -19,19 +23,37 @@ class ConvBlockLeakyRelu(nn.Module):
 
 
 class N2Net(nn.Module):
-    def __init__(self, in_channels=9):
+    def __init__(self, in_channels=9, hist_bins=8, mode="img"):
         super(N2Net, self).__init__()
-        self.in_channels = in_channels
+        self.mode = mode
+        self.hist_bins = hist_bins
+        self.hist_encoder_out_channels = 8  # fixed size after encoding
+        logger.info(f"Initialized N2Net with mode={self.mode}, input_channels={in_channels}")
+
+
+        # Dynamic input channel size based on mode
+        if self.mode == "hist":
+            self.spatial_in_channels = in_channels - (3 * hist_bins) + self.hist_encoder_out_channels
+            self.hist_encoder = HistogramEncoder(bins_per_channel=hist_bins,
+                                                 out_features=self.hist_encoder_out_channels)
+        else:
+            self.spatial_in_channels = in_channels  # full input is spatial
 
         # ---- Dynamic base width ----
-        self.base_width = 48 if in_channels <= 15 else int(in_channels * 1.5)
-        final_bw = 64 if in_channels <= 15 else int(in_channels * 2)
-        bw = self.base_width  # base feature size
-        bw2 = bw * 2  # used in decoder
+        self.base_width = 48 if self.spatial_in_channels <= 15 else int(self.spatial_in_channels * 1.5)
+        final_bw = 64 if self.spatial_in_channels <= 15 else int(self.spatial_in_channels * 2)
+        bw = self.base_width
+        bw2 = bw * 2
+
+        first_encoder_input_channels = (
+            self.spatial_in_channels + self.hist_encoder_out_channels
+            if self.mode == "hist"
+            else self.spatial_in_channels
+        )
 
         # ---- ENCODER ----
         self.enc_conv01 = nn.Sequential(
-            ConvBlockLeakyRelu(in_channels, bw, 3, stride=1, padding=1),
+            ConvBlockLeakyRelu(first_encoder_input_channels, bw, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(bw, bw, 3, stride=1, padding=1),
             nn.MaxPool2d(2)
         )
@@ -86,7 +108,12 @@ class N2Net(nn.Module):
 
         self._initialize_weights()
 
-    def forward(self, x):
+    def forward(self, x, x_hist=None):
+        if self.mode == "hist":
+            assert x_hist is not None, "x_hist must be provided in histogram mode"
+            hist_encoded = self.hist_encoder(x_hist)  # shape: (C, H, W)
+            x = torch.cat([x, hist_encoded], dim=1)
+
         residual_connection = [x]
 
         # ---- ENCODER ----

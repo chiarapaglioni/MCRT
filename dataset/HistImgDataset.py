@@ -451,7 +451,7 @@ class HistogramDataset(Dataset):
 
         # Mean and std
         rgb_stats = generate_hist_statistics(input_samples_tensor, return_channels='luminance')            
-        mean_img = apply_tonemap(rgb_stats["mean"], tonemap="log")                                  # (3, H, W)
+        mean_img = apply_tonemap(rgb_stats["mean"], tonemap="log")                 # (3, H, W)
         rel_var = apply_tonemap(rgb_stats["relative_variance"], tonemap="log")     # (1, H, W)
 
         input_tensor = torch.cat([input_tensor, mean_img, rel_var], dim=0)
@@ -485,7 +485,7 @@ class HistogramDataset(Dataset):
             "input": input_tensor,                                          # (C, H, W)
             "target": target_tensor,                                        # (3, H, W)
             "noisy": noisy_tensor,                                          # (3, H, W)
-            "clean": clean_tensor if clean_tensor is not None else None,   # (3, H, W) or None
+            "clean": clean_tensor if clean_tensor is not None else None,    # (3, H, W) or None
             "scene": scene,
             "bin_edges": bin_edges_tensor,
             "crop_coords": (i, j, h, w),

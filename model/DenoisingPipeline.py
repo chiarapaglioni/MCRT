@@ -129,7 +129,7 @@ def evaluate_sample(model, input_tensor, clean_tensor):
 
 
 # TRAINING STEP
-def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=None, debug=True, plot_every_n=10):
+def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, epoch=None, debug=True, plot_every_n=10):
     model.train()
     total_loss = 0
 
@@ -139,13 +139,18 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
 
         optimizer.zero_grad()
 
-        pred = model(hdr_input)                             # B, 3, H, W (HDR space)
+        if mode == "hist":
+            x_hist = hdr_input[:, :3*16]                        # (B, 48, H, W)
+            x_spatial = hdr_input[:, 3*16:, :, :]               # (B, 6, H, W)
+            pred = model(x_spatial, x_hist)                     # B, 3, H, W (HDR space)
+        else:
+            pred = model(hdr_input)                             # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
         if batch_idx % 50 == 0:
             # Only take RGB channels if input has more than 3 channels
             input_rgb = hdr_input[:, :3] if hdr_input.shape[1] > 3 else hdr_input
-            pred_tonamepped = apply_tonemap(pred, tonemap="none"),
+            pred_tonamepped = apply_tonemap(pred, tonemap=tonemap),
 
             logger.info(f"Input (RGB) Min {input_rgb.min():.4f} - Max {input_rgb.max():.4f} - Mean {input_rgb.mean():.4f} - Var {input_rgb.var():.4f}")
             logger.info(f"Target Min {hdr_target.min():.4f} - Max {hdr_target.max():.4f} - Mean {hdr_target.mean():.4f} - Var {hdr_target.var():.4f}")
@@ -153,7 +158,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
             logger.info("-------------------------------------------------------------------")
 
         # LOSS (in tonemapped space if tonemap != none)
-        loss = criterion(apply_tonemap(pred, tonemap="none"), apply_tonemap(hdr_target, tonemap="none"))
+        loss = criterion(apply_tonemap(pred, tonemap=tonemap), apply_tonemap(hdr_target, tonemap=tonemap))
         loss.backward()
         optimizer.step()
 
@@ -167,7 +172,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, epoch=
 
 
 # VALIDATION STEP
-def validate_epoch(model, dataloader, criterion, device, tonemap):
+def validate_epoch(model, dataloader, criterion, device, tonemap, mode):
     model.eval()
     total_loss = 0
     total_psnr = 0
@@ -179,16 +184,22 @@ def validate_epoch(model, dataloader, criterion, device, tonemap):
             hdr_target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)               # B, 3, H, W
 
-            pred = model(hdr_input)                         # B, 3, H, W (HDR space)
+            if mode == "hist":
+                # TODO: set bin size 16 to be configurable :)
+                x_hist = hdr_input[:, :3*16]                        # (B, 48, H, W)
+                x_spatial = hdr_input[:, 3*16:, :, :]               # (B, 6, H, W)
+                pred = model(x_spatial, x_hist)                     # B, 3, H, W (HDR space)
+            else:
+                pred = model(hdr_input)                             # B, 3, H, W (HDR space)
 
-            loss = criterion(apply_tonemap(pred, tonemap="none"), apply_tonemap(hdr_target, tonemap="none"))
+            loss = criterion(apply_tonemap(pred, tonemap=tonemap), apply_tonemap(hdr_target, tonemap=tonemap))
             total_loss += loss.item()
 
             for i in range(pred.shape[0]):
                 pred_i_hdr = pred[i]
                 clean_i_hdr = clean[i]
 
-                total_psnr += compute_psnr(apply_tonemap(pred_i_hdr, tonemap="none"), apply_tonemap(clean_i_hdr, tonemap="none"))
+                total_psnr += compute_psnr(apply_tonemap(pred_i_hdr, tonemap=tonemap), apply_tonemap(clean_i_hdr, tonemap=tonemap))
                 count += 1
 
     avg_loss = total_loss / len(dataloader)
@@ -226,7 +237,17 @@ def train_model(config):
         ).to(device)
 
     elif model_cfg['model_name'] == 'n2n':
-        model = N2Net(in_channels=model_cfg['in_channels']).to(device)
+        if model_cfg["mode"] == "hist":
+            model = N2Net(
+                in_channels=model_cfg["in_channels"],       # total channels: histogram + spatial
+                hist_bins=dataset_cfg["hist_bins"],         # how many bins per channel
+                mode="hist"
+            ).to(device)
+        else:  # "img" mode
+            model = N2Net(
+                in_channels=model_cfg["in_channels"],       # e.g., 3 or 9 channels (mean + AOV + variance)
+                mode="img"
+            ).to(device)
 
     # OPTIMIZER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
@@ -272,8 +293,8 @@ def train_model(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
-        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'])
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], mode=model_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
+        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=model_cfg["mode"])
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -445,7 +466,7 @@ def benchmark_num_workers(config, batch_size=32, max_workers=8):
     if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
         full_dataset = ImageDataset(**dataset_cfg, run_mode="test")
     elif dataset_cfg['mode']=='hist':
-        full_dataset = CropHistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
+        full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
 
     logger.info(f"Total dataset size: {len(full_dataset)}")
 
