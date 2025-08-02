@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model.HistogramEncoder import HistogramEncoder
+from model.HistogramEncoder import HistogramEncoder, HistFeatureModulator
 
 import logging
 logger = logging.getLogger(__name__)
@@ -30,7 +30,6 @@ class N2Net(nn.Module):
         self.hist_encoder_out_channels = 8  # fixed size after encoding
         logger.info(f"Initialized N2Net with mode={self.mode}, input_channels={in_channels}")
 
-
         # Dynamic input channel size based on mode
         if self.mode == "hist":
             hist_channels = 3 * hist_bins
@@ -48,15 +47,17 @@ class N2Net(nn.Module):
         bw = self.base_width
         bw2 = bw * 2
 
+        if self.mode == 'hist':
+            self.mod_enc_conv01 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
+            self.mod_enc_conv2 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
+
         # Change encoder/decoder input channels based on the mode!
         first_encoder_input_channels = (
             self.spatial_in_channels + self.hist_encoder_out_channels
             if self.mode == "hist"
             else self.spatial_in_channels
         )
-        first_decoder_input_channels = bw2 + (
-            (self.spatial_in_channels + self.hist_encoder_out_channels) if self.mode == "hist" else in_channels
-        )
+        first_decoder_input_channels = bw2 + self.spatial_in_channels
 
         # ---- ENCODER ----
         self.enc_conv01 = nn.Sequential(
@@ -117,18 +118,23 @@ class N2Net(nn.Module):
 
     def forward(self, x, x_hist=None):
         if self.mode == "hist":
-            assert x_hist is not None, "x_hist must be provided in histogram mode"
-            hist_encoded = self.hist_encoder(x_hist)                # shape: (C, H, W)
-            spatial_x = x[:, :self.spatial_in_channels, :, :]
-            x = torch.cat([spatial_x, hist_encoded], dim=1)
+            assert x_hist is not None, "Histogram input required in hist mode"
+            hist_feat = self.hist_encoder(x_hist)  # [B, D]
+
+        spatial_x = x[:, :self.spatial_in_channels, :, :]
+        x = spatial_x  # no concat here
 
         residual_connection = [x]
 
         # ---- ENCODER ----
         x = self.enc_conv01(x)
+        if self.mode == "hist":
+            x = self.mod_enc_conv01(x, hist_feat)       # modulate with histogram features
         residual_connection.append(x)
 
         x = self.enc_conv2(x)
+        if self.mode == "hist":
+            x = self.mod_enc_conv2(x, hist_feat)        # modulate with histogram features
         residual_connection.append(x)
 
         x = self.enc_conv3(x)
