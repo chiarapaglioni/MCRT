@@ -214,7 +214,8 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
 
             # DEBUG (plot the first batch)
             if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
-                plot_debug_aggregation(pre_agg_pred, pred, tonemap, epoch)
+                input_rgb = hdr_input[:, :3] if hdr_input.shape[1] > 3 else hdr_input
+                plot_debug_aggregation(pre_agg_pred, pred, input_rgb, clean, epoch)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count

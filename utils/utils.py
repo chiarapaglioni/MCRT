@@ -247,41 +247,53 @@ def plot_debug_images(batch, preds=None, epoch=None, batch_idx=None, correct=Fal
     plt.close()
 
 
-def plot_debug_aggregation(pre_agg_pred, post_agg_pred, tonemap, epoch, debug_dir="debug_plots", max_samples=2):
+def plot_debug_aggregation(pre_agg_pred, post_agg_pred, input, clean, epoch, debug_dir="debug_plots", idx=0):
     """
     Save side-by-side plots of predictions before and after histogram aggregation.
 
     Args:
         pre_agg_pred (torch.Tensor): Pre-aggregation model predictions (B, C, H, W).
         post_agg_pred (torch.Tensor): Post-aggregation predictions (B, C, H, W).
-        tonemap (str): Tonemapping mode used for visualization.
+        input (torch.Tensor): Pre-aggregation model predictions (B, C, H, W).
+        clean (torch.Tensor): Post-aggregation predictions (B, C, H, W).
         epoch (int): Current epoch, used for file naming.
         debug_dir (str): Output directory to save plots.
-        max_samples (int): Maximum number of examples to visualize.
+        idx (int): id of the image to visualise
     """
     os.makedirs(debug_dir, exist_ok=True)
 
-    for i in range(min(max_samples, pre_agg_pred.shape[0])):
-        pre_agg = pre_agg_pred[i].detach().cpu()
-        post_agg = post_agg_pred[i].detach().cpu()
+    pre_agg = pre_agg_pred[idx].detach().cpu()
+    post_agg = post_agg_pred[idx].detach().cpu()
+    input_img = input[idx].detach().cpu()
+    clean_img = clean[idx].detach().cpu()
 
-        # Tonemap for visualization
-        pre_agg_img = tonemap_gamma_correct(pre_agg)
-        post_agg_img = tonemap_gamma_correct(post_agg)
+    # Tonemap for visualization
+    pre_agg_img = tonemap_gamma_correct(pre_agg)
+    post_agg_img = tonemap_gamma_correct(post_agg)
+    input_img = tonemap_gamma_correct(input_img)
+    clean_img = tonemap_gamma_correct(clean_img)
 
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        axes[0].imshow(TF.to_pil_image(pre_agg_img))
-        axes[0].set_title("Before Hist Aggregation", fontsize=12)
-        axes[0].axis("off")
+    fig, axes = plt.subplots(1, 4, figsize=(10, 5))
+    axes[0].imshow(TF.to_pil_image(input_img))
+    axes[0].set_title("Input", fontsize=12)
+    axes[0].axis("off")
 
-        axes[1].imshow(TF.to_pil_image(post_agg_img))
-        axes[1].set_title("After Hist Aggregation", fontsize=12)
-        axes[1].axis("off")
+    axes[1].imshow(TF.to_pil_image(pre_agg_img))
+    axes[1].set_title("Before Hist Aggregation", fontsize=12)
+    axes[1].axis("off")
 
-        plt.tight_layout()
-        save_path = os.path.join(debug_dir, f"epoch_{epoch}_sample_{i}_agg.png")
-        plt.savefig(save_path, bbox_inches="tight")
-        plt.close(fig)
+    axes[2].imshow(TF.to_pil_image(post_agg_img))
+    axes[2].set_title("After Hist Aggregation", fontsize=12)
+    axes[2].axis("off")
+
+    axes[3].imshow(TF.to_pil_image(clean_img))
+    axes[3].set_title("Clean", fontsize=12)
+    axes[3].axis("off")
+
+    plt.tight_layout()
+    save_path = os.path.join(debug_dir, f"epoch_{epoch}_sample_{idx}_agg.png")
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
 
 
 def save_tiff(data, file_name):
