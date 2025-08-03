@@ -47,9 +47,10 @@ class N2Net(nn.Module):
         bw = self.base_width
         bw2 = bw * 2
 
-        if self.mode == 'hist':
-            self.mod_enc_conv01 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
-            self.mod_enc_conv2 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
+        # TODO: currently removed learnable hist features as they were not helping
+        # if self.mode == 'hist':
+        #     self.mod_enc_conv01 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
+        #     self.mod_enc_conv2 = HistFeatureModulator(self.hist_encoder_out_channels, bw)
 
         # Change encoder/decoder input channels based on the mode!
         first_encoder_input_channels = self.spatial_in_channels
@@ -124,13 +125,14 @@ class N2Net(nn.Module):
 
         # ---- ENCODER ----
         x = self.enc_conv01(x)
-        if self.mode == "hist":
-            x = self.mod_enc_conv01(x, hist_feat)       # modulate with histogram features
+        # TODO: currently removed learnable hist features as they were not helping
+        # if self.mode == "hist":
+        #     x = self.mod_enc_conv01(x, hist_feat)       # modulate with histogram features
         residual_connection.append(x)
 
         x = self.enc_conv2(x)
-        if self.mode == "hist":
-            x = self.mod_enc_conv2(x, hist_feat)        # modulate with histogram features
+        # if self.mode == "hist":
+        #     x = self.mod_enc_conv2(x, hist_feat)        # modulate with histogram features
         residual_connection.append(x)
 
         x = self.enc_conv3(x)

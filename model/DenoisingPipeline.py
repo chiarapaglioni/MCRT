@@ -15,7 +15,7 @@ from datetime import datetime
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
 from dataset.HistImgDataset import ImageDataset, HistogramDataset
-from dataset.HistogramPatchAggregator import HistogramPatchAggregator
+from dataset.HistImgPatchAggregator import PatchAggregator
 from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap, plot_debug_aggregation
 
 # Logger
@@ -179,7 +179,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
     total_psnr = 0
     count = 0
 
-    aggregator = HistogramPatchAggregator().to(device)
+    aggregator = PatchAggregator(kernel_size=7, sigma_color=0.1)
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -189,13 +189,16 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
 
             if mode == "hist":
                 # TODO: set bin size 16 to be configurable :)
-                x_hist = hdr_input[:, :3*16]                        # (B, 48, H, W)
-                x_spatial = hdr_input[:, 3*16:, :, :]               # (B, 6, H, W)
-                pred = model(x_spatial, x_hist)                     # B, 3, H, W (HDR space)
+                x_hist = hdr_input[:, :3*16]                    # (B, 48, H, W)
+                x_spatial = hdr_input[:, 3*16:, :, :]           # (B, 6, H, W)                  
 
-                # HIST AGGREGATOR
-                pre_agg_pred = model(x_spatial, x_hist)       # Save pre-aggregated output
-                pred = aggregator(pre_agg_pred, x_spatial)    # Use spatial only as reference
+                # PREDICTION
+                pre_agg_pred = model(x_spatial, x_hist)         # B, 3, H, W (HDR space)
+                
+                # AGGREGATOR
+                pred = aggregator(output=pre_agg_pred, features=[(x_hist, 0.3)])                      # hist only
+                # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
+                # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2), (x_hist, 0.3)])  # hybrid
             else:
                 pred = model(hdr_input)                             # B, 3, H, W (HDR space)
 
