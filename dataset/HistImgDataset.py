@@ -278,7 +278,7 @@ class HistogramDataset(Dataset):
                  data_augmentation: bool = True, crops_per_scene: int = 1000,
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
                  clean: bool = False, aov: bool = False, cached_dir: str = None, debug: bool = False,
-                 device: str = None, hist_regeneration: bool = False, scene_names=None,
+                 device: str = None, scene_names=None,
                  supervised: bool = False, tonemap: str = None, target_split: int = 1, run_mode: str = None,
                  use_cached_crops: bool = False):
         
@@ -498,8 +498,7 @@ class HistogramBinomDataset(Dataset):
                  data_augmentation: bool = True, virt_size: int = 1000,
                  hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
                  high_spp: int = 4500, cached_dir: str = None,
-                 debug: bool = False, mode: str = None, device: str = None,
-                 hist_regeneration: bool = False, scene_names=None, 
+                 debug: bool = False, mode: str = None, device: str = None, scene_names=None, 
                  target_sample: int = 1, stat: bool = True):
         
         self.root_dir = root_dir
@@ -515,7 +514,6 @@ class HistogramBinomDataset(Dataset):
         self.debug = debug
         self.device = device
         logger.info(f"Using device Data Loader: {self.device}")
-        self.hist_regeneration = hist_regeneration
         self.target_sample = target_sample
 
         self.hist_features = {}      # input histograms (from spp1 samples)
@@ -678,8 +676,7 @@ class CropHistogramBinomDataset(Dataset):
                  data_augmentation: bool = True, virt_size: int = 1000,
                  hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
                  high_spp: int = 4500, cached_dir: str = None,
-                 debug: bool = False, mode: str = None, device: str = None,
-                 hist_regeneration: bool = False, scene_names=None, 
+                 debug: bool = False, mode: str = None, device: str = None, scene_names=None, 
                  target_sample: int = 1, stat: bool = True):
         self.root_dir = root_dir
         self.crop_size = crop_size
@@ -694,7 +691,6 @@ class CropHistogramBinomDataset(Dataset):
         self.debug = debug
         self.device = device
         logger.info(f"Using device Data Loader: {self.device}")
-        self.hist_regeneration = hist_regeneration
         self.target_sample = target_sample
 
         self.hist_features = {}      # input histograms (from spp1 samples)

@@ -11,8 +11,7 @@ dataset:
   clean: true                           # whether to include 'clean' targets if available
   debug: true                           # saves plot to output save_dir for debugging
   stat: true                            # whether to include mean and var value alongside histogram (helps with colour reconstruction)
-  hist_regeneration: false
-  target_sample: 16
+  target_sample: 16                     # number of samples assigned to target (out of low_spp samples)
 
 model:
   model_name: gap

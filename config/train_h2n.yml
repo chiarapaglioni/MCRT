@@ -2,7 +2,7 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 150                     # num of crops per scene to generate
+  crops_per_scene: 10                     # num of crops per scene to generate
   use_cached_crops: true
   low_spp: 32
   high_spp: 4500
@@ -18,7 +18,7 @@ dataset:
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
-  in_channels: 58                       # 58 with AOV and stats
+  in_channels: 58                       # 58 with (3*16=48)HIST + (3mean + 1var)IMG + (3albedo + 3normal)AOV
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 4                              # only for GAP model

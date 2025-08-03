@@ -205,6 +205,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
             loss = criterion(apply_tonemap(pred, tonemap=tonemap), apply_tonemap(hdr_target, tonemap=tonemap))
             total_loss += loss.item()
 
+            # PSNR
             for i in range(pred.shape[0]):
                 pred_i_hdr = pred[i]
                 clean_i_hdr = clean[i]
@@ -214,7 +215,8 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
 
             # DEBUG (plot the first batch)
             if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
-                input_rgb = hdr_input[:, :3] if hdr_input.shape[1] > 3 else hdr_input
+                # TODO: make this more flexible!!
+                input_rgb = hdr_input[:, :3] if hdr_input.shape[1] <= 10 else hdr_input[:, 48:51]  # shape: [10, 3, 128, 128]
                 plot_debug_aggregation(pre_agg_pred, pred, input_rgb, clean, epoch)
 
     avg_loss = total_loss / len(dataloader)

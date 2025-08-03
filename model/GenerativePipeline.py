@@ -15,7 +15,8 @@ import matplotlib.pyplot as plt
 # Custom
 from model.UNet import GapUNet
 from dataset.HistImgDataset import CropHistogramBinomDataset, HistogramBinomDataset
-from utils.utils import load_model, save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot, tonemap_gamma_correct
+from dataset.HistImgPatchAggregator import PatchAggregator
+from utils.utils import load_model, save_loss_plot, decode_image_from_probs, compute_psnr, save_psnr_plot, tonemap_gamma_correct, plot_debug_aggregation
 
 import logging
 logger = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ class CustomCrossEntropyLoss(nn.Module):
             Scalar loss value
         """
         log_probs = F.log_softmax(pred_logits, dim=1)           # (N, n_bins)
-        
         # Cross entropy: -sum(target * log(predicted)) per sample
         ce_loss = -(target_probs * log_probs).sum(dim=1)        # (N,)
         
@@ -114,24 +114,33 @@ def get_generative_dataloaders(config, device):
 
 
 def count_bin0_only_histograms(input_hist, title):
-    # input_hist: shape (B, C, bins, H, W)
+    """
+    Count how many histograms in the input are 'bin-0-only' — i.e., where the entire probability mass
+    is located in the first bin and all other bins are zero. This is a useful diagnostic to detect 
+    collapsed or degenerate distributions.
+
+    Args:
+        input_hist (torch.Tensor): Histogram tensor of shape (B, C, bins, H, W).
+        title (str): Descriptive label used for logging the output.
+
+    Logs:
+        The number and percentage of histograms that are exclusively activated at bin 0.
+    """
     bins = input_hist.shape[2]
     device = input_hist.device
 
-    # One-hot vector [1, 0, ..., 0]
+    # Define the 'bin-0-only' one-hot target vector: [1, 0, 0, ..., 0]
     target = torch.zeros((bins,), device=device)
     target[0] = 1.0
-
-    # Reshape histograms to (N, bins)
     input_flat = input_hist.permute(0, 1, 3, 4, 2).reshape(-1, bins)
 
-    # Boolean mask where each histogram exactly matches target
+    # Histograms that exactly match the target vector
+    # TODO: add match based on some threshold
     matches = (input_flat == target).all(dim=1)
 
-    # Count and total
+    # Percentage of bin-0-only histograms
     count = matches.sum().item()
     total = input_flat.shape[0]
-
     percentage = (count / total) * 100
     logger.info(f"{title} hist: {count}/{total} histograms are bin-0-only ({percentage:.2f}%)")
 
@@ -185,19 +194,21 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
 
 
 # VALIDATION STEP - DISTRIBUTION
-def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
+def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch, plot_every_n, debug=False):
     model.eval()
     total_loss = 0.0
     total_psnr = 0.0
     count = 0
 
+    aggregator = PatchAggregator(kernel_size=7, sigma_color=0.1)
+
     with torch.no_grad():
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
             input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
             target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
             clean_img = batch['clean'].to(device)                           # (B, C, H, W)
             bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
-            # bin_weights = batch['bin_weights'][1].to(device)                # (B, bins+1)
+            # bin_weights = batch['bin_weights'][1].to(device)              # (B, bins+1)
 
             # Forward pass
             pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
@@ -210,31 +221,38 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins):
             loss = loss_fn(pred_logits_flat, target_hist_flat)
             total_loss += loss.item()
 
-            # Decode histograms to RGB
+            # Network output --> softmax --> proabilities --> RGB image
             pred_probs = torch.softmax(pred_logits, dim=2)
             pred_rgb_img = decode_image_from_probs(pred_probs, bin_edges)   # (B, C, H, W)
 
-            # DEBUG logging
+            # AGGREGATOR
+            guidance_feature = input_hist.view(input_hist.size(0), -1, input_hist.size(-2), input_hist.size(-1))  # (B, C*bins, H, W)
+            pred = aggregator(output=pred_rgb_img, features=[(guidance_feature, 0.3)])
+
+            # DEBUG (stats)
             if count % 5 == 0:
-                # print dist stats
                 x, y = 50, 50
                 logger.info(f"Input Dist: {input_hist[0, 0, :, x, y]}")
                 logger.info(f"Target Dist: {target_hist[0, 0, :, x, y]}")
                 logger.info(f"Pred Dist: {pred_probs[0, 0, :, x, y]}")
 
-                # print image stats (pred)
-                means = pred_rgb_img.mean(dim=[0, 2, 3])  # Mean over batch, height, width per channel
-                stds = pred_rgb_img.std(dim=[0, 2, 3])    # Std over batch, height, width per channel
-                mins = pred_rgb_img.amin(dim=[0, 2, 3])   # Min per channel
-                maxs = pred_rgb_img.amax(dim=[0, 2, 3])   # Max per channel
+                means = pred_rgb_img.mean(dim=[0, 2, 3])    # Mean over batch, height, width per channel
+                stds = pred_rgb_img.std(dim=[0, 2, 3])      # Std over batch, height, width per channel
+                mins = pred_rgb_img.amin(dim=[0, 2, 3])     # Min per channel
+                maxs = pred_rgb_img.amax(dim=[0, 2, 3])     # Max per channel
 
                 for c in range(3):
                     logger.info(f"  Channel {c}: mean={means[c].item():.4f}, std={stds[c].item():.4f}, min={mins[c].item():.4f}, max={maxs[c].item():.4f}")
 
-            # Compute PSNR
+            # PSNR
             for i in range(pred_rgb_img.size(0)):
                 total_psnr += compute_psnr(pred_rgb_img[i], clean_img[i])
                 count += 1
+
+            # DEBUG (images)
+            if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
+                input_rgb = decode_image_from_probs(input_hist, bin_edges)   # (B, C, H, W)
+                plot_debug_aggregation(pred_rgb_img, pred, input_rgb, clean_img, epoch)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count if count > 0 else 0.0
@@ -287,7 +305,7 @@ def train_histogram_generator(config):
         start_time = time.time()
 
         train_loss = train_generative_epoch(model, loss_fn, train_loader, optimizer, device, n_bins, epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
-        val_loss, val_psnr = validate_generative_epoch(model, loss_fn, val_loader, device, n_bins)
+        val_loss, val_psnr = validate_generative_epoch(model, loss_fn, val_loader, device, n_bins, epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)

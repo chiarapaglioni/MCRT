@@ -26,7 +26,6 @@ dataset:
   clean: true
   aov: true
   debug: false
-  hist_regeneration: false
   supervised: false
   tonemap: none                         # 'log' or 'reinhard' or 'none'
   target_split: 16
