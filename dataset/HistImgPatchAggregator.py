@@ -26,7 +26,6 @@ class PatchAggregator(nn.Module):
     Output:
     - result: [B, 3, H, W] - Smoothed result.
     """
-
     def __init__(self, kernel_size=7, sigma_color=0.1):
         super().__init__()
         self.kernel_size = kernel_size
@@ -42,14 +41,12 @@ class PatchAggregator(nn.Module):
         B, C, H, W = output.shape
 
         # Unfold the output image into patches
-        unfolded_output = F.unfold(output, kernel_size=self.kernel_size, padding=self.padding)      # [B, C*K*K, H*W]
-        patches_output = unfolded_output.view(B, C, self.kernel_size**2, H*W).permute(0, 3, 1, 2)   # [B, HW, C, K*K]
-        output_center = output.view(B, C, -1).permute(0, 2, 1).unsqueeze(-1)                        # [B, HW, C, 1]
+        unfolded_output = F.unfold(output, kernel_size=self.kernel_size, padding=self.padding)
+        patches_output = unfolded_output.view(B, C, self.kernel_size**2, H*W).permute(0, 3, 1, 2)       # [B, HW, C, K*K]
+        output_center = output.view(B, C, -1).permute(0, 2, 1).unsqueeze(-1)                            # [B, HW, C, 1]
 
-        # Compute color distance
-        color_dist = ((patches_output - output_center) ** 2).sum(2)                                 # [B, HW, K*K]
-
-        # Initialize total distance with color term
+        # Color (output) distance
+        color_dist = ((patches_output - output_center) ** 2).sum(2)  # [B, HW, K*K]
         total_dist = color_dist / (self.sigma_color ** 2 + 1e-8)
 
         # Add each guidance feature's distance term
@@ -59,8 +56,17 @@ class PatchAggregator(nn.Module):
                 unfolded_feat = F.unfold(feat, kernel_size=self.kernel_size, padding=self.padding)      # [B, Cf*K*K, H*W]
                 patches_feat = unfolded_feat.view(B, Cf, self.kernel_size**2, H*W).permute(0, 3, 1, 2)  # [B, HW, Cf, K*K]
                 center_feat = feat.view(B, Cf, -1).permute(0, 2, 1).unsqueeze(-1)                       # [B, HW, Cf, 1]
-                feat_dist = ((patches_feat - center_feat) ** 2).sum(2)                                  # [B, HW, K*K]
-                total_dist += feat_dist / (sigma ** 2 + 1e-8)
+                
+                # CHI 2 DISTANCE
+                # (same as RHF and BCD)
+                numerator = (patches_feat - center_feat) ** 2
+                denominator = patches_feat + center_feat + 1e-6                     # prevent div-by-zero
+                chi2 = (numerator / denominator).sum(2)                             # [B, HW, K*K]
+                total_dist += chi2 / (sigma ** 2 + 1e-8)
+                
+                # EUCLIDEAN DISTANCE
+                # feat_dist = ((patches_feat - center_feat) ** 2).sum(2)            # [B, HW, K*K]
+                # total_dist += feat_dist / (sigma ** 2 + 1e-8)
 
         # Compute weights
         weights = torch.exp(-total_dist)  # [B, HW, K*K]
