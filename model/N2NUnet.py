@@ -117,7 +117,7 @@ class N2Net(nn.Module):
     def forward(self, x, x_hist=None):
         if self.mode == "hist":
             assert x_hist is not None, "Histogram input required in hist mode"
-            hist_feat = self.hist_encoder(x_hist)  # [B, D]
+            # hist_feat = self.hist_encoder(x_hist)  # [B, D]
 
         spatial_x = x[:, :self.spatial_in_channels, :, :]
         x = spatial_x  # no concat here

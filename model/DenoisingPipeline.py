@@ -218,7 +218,10 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
                 # TODO: make this more flexible!!
                 input_rgb = hdr_input[:, :3] if hdr_input.shape[1] <= 10 else hdr_input[:, 48:51]  # shape: [10, 3, 128, 128]
                 plot_debug_aggregation(pre_agg_pred, pred, input_rgb, clean, epoch)
-                plot_aggregation_analysis(pre_agg_pred, pred, pred_img, clean, epoch)
+                
+                # randomly pick one index from the batch
+                random_idx = random.randint(0, pred.shape[0] - 1)
+                plot_aggregation_analysis(pre_agg_pred, pred, pred_img, clean, epoch, idx=random_idx)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count
