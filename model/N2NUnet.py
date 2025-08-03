@@ -30,11 +30,12 @@ class N2Net(nn.Module):
         self.hist_encoder_out_channels = 8  # fixed size after encoding
         logger.info(f"Initialized N2Net with mode={self.mode}, input_channels={in_channels}")
 
-        # Dynamic input channel size based on mode
+        # INPUT CHANNELS
         if self.mode == "hist":
             hist_channels = 3 * hist_bins
             self.spatial_in_channels = in_channels - hist_channels
-            self.hist_encoder = HistogramEncoder(bins_per_channel=hist_bins, out_features=self.hist_encoder_out_channels)
+            # TODO: currently commented out histogram encoding as it is not giving good results 
+            # self.hist_encoder = HistogramEncoder(bins_per_channel=hist_bins, out_features=self.hist_encoder_out_channels)
             logger.info(f"Hist input_channels={hist_channels}")
         else:
             self.spatial_in_channels = in_channels  # full input is spatial
