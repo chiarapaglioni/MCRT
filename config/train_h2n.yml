@@ -37,6 +37,6 @@ val_split: 0.1                           # 10% validation split
 
 # TRAINING
 num_epochs: 100
-plot_every: 10                           # how often to save the debug plots
+plot_every: 1                            # how often to save the debug plots
 save_dir: checkpoints
 input_tonemap: none                      # what tone mapping to apply in the loss

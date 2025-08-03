@@ -194,7 +194,7 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
 
 
 # VALIDATION STEP - DISTRIBUTION
-def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch, plot_every_n, debug=False):
+def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch, debug=True, plot_every_n=1):
     model.eval()
     total_loss = 0.0
     total_psnr = 0.0
@@ -252,7 +252,7 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
             # DEBUG (images)
             if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
                 input_rgb = decode_image_from_probs(input_hist, bin_edges)   # (B, C, H, W)
-                plot_debug_aggregation(pred_rgb_img, pred, input_rgb, clean_img, epoch)
+                plot_debug_aggregation(pred_rgb_img, pred, input_rgb, clean_img, epoch, debug_dir="debug_plots_gen")
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count if count > 0 else 0.0

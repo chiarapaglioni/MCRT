@@ -296,6 +296,60 @@ def plot_debug_aggregation(pre_agg_pred, post_agg_pred, input, clean, epoch, deb
     plt.close(fig)
 
 
+def plot_aggregation_analysis(pre_agg_pred, post_agg_hist, post_agg_img, clean, epoch, debug_dir="debug_plots", idx=0):
+    """
+    Save side-by-side plots of predictions before and after histogram aggregation.
+
+    Args:
+        pre_agg_pred (torch.Tensor): Pre-aggregation model predictions (B, C, H, W).
+        post_agg_pred (torch.Tensor): Post-aggregation predictions (B, C, H, W).
+        input (torch.Tensor): Pre-aggregation model predictions (B, C, H, W).
+        clean (torch.Tensor): Post-aggregation predictions (B, C, H, W).
+        epoch (int): Current epoch, used for file naming.
+        debug_dir (str): Output directory to save plots.
+        idx (int): id of the image to visualise
+    """
+    os.makedirs(debug_dir, exist_ok=True)
+
+    pre_agg = pre_agg_pred[idx].detach().cpu()
+    post_agg_hist = post_agg_hist[idx].detach().cpu()
+    post_agg_img = post_agg_img[idx].detach().cpu()
+    clean_img = clean[idx].detach().cpu()
+
+    hist_psnr = compute_psnr(post_agg_hist, clean_img)
+    img_psnr = compute_psnr(post_agg_img, clean_img)
+
+    # Tonemap for visualization
+    pre_agg_img = tonemap_gamma_correct(pre_agg)
+    post_agg_hist = tonemap_gamma_correct(post_agg_hist)
+    post_agg_img = tonemap_gamma_correct(post_agg_img)
+    clean_img = tonemap_gamma_correct(clean_img)
+
+    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
+
+    axes[0].imshow(TF.to_pil_image(pre_agg_img))
+    axes[0].set_title("Before Aggregation", fontsize=10)
+    axes[0].axis("off")
+
+    axes[1].imshow(TF.to_pil_image(post_agg_hist))
+    axes[1].set_title(f"HIST Aggregation\nPSNR {hist_psnr:.2f}", fontsize=10)
+    axes[1].axis("off")
+
+    axes[2].imshow(TF.to_pil_image(post_agg_img))
+    axes[2].set_title(f"IMG Aggregation\nPSNR {img_psnr:.2f}", fontsize=10)
+    axes[2].axis("off")
+
+    axes[3].imshow(TF.to_pil_image(clean_img))
+    axes[3].set_title("Clean", fontsize=10)
+    axes[3].axis("off")
+
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0.3) 
+    save_path = os.path.join(debug_dir, f"epoch_{epoch}_sample_{idx}_agg_analysis.png")
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+
+
 def save_tiff(data, file_name):
     """
     Saves data of shape (N, H, W, C, B) to TIFF file using BigTIFF if needed.

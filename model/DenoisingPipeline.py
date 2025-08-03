@@ -16,7 +16,7 @@ from model.UNet import GapUNet
 from model.N2NUnet import N2Net
 from dataset.HistImgDataset import ImageDataset, HistogramDataset
 from dataset.HistImgPatchAggregator import PatchAggregator
-from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap, plot_debug_aggregation
+from utils.utils import load_model, plot_images, save_loss_plot, save_psnr_plot, plot_debug_images, compute_psnr, compute_global_mean_std, apply_tonemap, plot_debug_aggregation, plot_aggregation_analysis
 
 # Logger
 import logging
@@ -197,7 +197,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
                 
                 # AGGREGATOR
                 pred = aggregator(output=pre_agg_pred, features=[(x_hist, 0.3)])                      # hist only
-                # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
+                pred_img  = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
                 # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2), (x_hist, 0.3)])  # hybrid
             else:
                 pred = model(hdr_input)                             # B, 3, H, W (HDR space)
@@ -218,6 +218,7 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
                 # TODO: make this more flexible!!
                 input_rgb = hdr_input[:, :3] if hdr_input.shape[1] <= 10 else hdr_input[:, 48:51]  # shape: [10, 3, 128, 128]
                 plot_debug_aggregation(pre_agg_pred, pred, input_rgb, clean, epoch)
+                plot_aggregation_analysis(pre_agg_pred, pred, pred_img, clean, epoch)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count
