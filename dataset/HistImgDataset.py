@@ -344,7 +344,7 @@ class HistogramDataset(Dataset):
                     self.spp1_images[key] = spp1_tensor
                 
                     # HISTOGRAMS
-                    cache_path = os.path.join(self.cached_dir, f"{key}_histograms.pt") if self.cached_dir else None
+                    cache_path = os.path.join(self.cached_dir, f"{key}_histogram_{self.hist_bins}bins.pt") if self.cached_dir else None
                     if cache_path and os.path.exists(cache_path):
                         # Load cached histograms
                         cached_data = torch.load(cache_path)
@@ -469,7 +469,6 @@ class HistogramDataset(Dataset):
             "bin_edges": bin_edges,
             "crop_coords": (i, j, h, w),
         }
-
 
 
 # GENERATIVE ACCUMULATION - HISTOGRAM BINOM DATASET
@@ -598,10 +597,9 @@ class HistogramBinomDataset(Dataset):
 
 
         # Randomize target_sample each time (currently discarded because it adds more noise)
-        # target_sample = random.choice([8, 12, 16, 20, 24])
-        target_sample = 16
-        p = torch.tensor(min(target_sample / (self.low_spp + 1e-8), 1.0))       # Compute binomial sampling probability
-        binom = torch.distributions.Binomial(total_count=hist, probs=p)         # Generate binomial input and target histograms
+        # target_sample = random.choice([8, 12, , 20, 24])
+        p = torch.tensor(min(self.target_sample / (self.low_spp + 1e-8), 1.0))              # Compute binomial sampling probability
+        binom = torch.distributions.Binomial(total_count=hist, probs=p)                     # Generate binomial input and target histograms
         target_hist = binom.sample()
         input_hist = hist - target_hist
 
@@ -649,7 +647,7 @@ class HistogramBinomDataset(Dataset):
 # GENERATIVE ACCUMULATION - CROP HISTOGRAM BINOM DATASET
 class CropHistogramBinomDataset(Dataset):
     """"
-        Gives better results as the range is more restricted so more balanced histogram for 128x128 crops and 16 bins
+        Gives better results as the range is more restricted so more balanced histogram for 128x128 crops and  bins
         BUT more difficul for model to learn as range chanegs for very crop
     """
     def __init__(self, root_dir: str, crop_size: int = 128,
@@ -752,10 +750,9 @@ class CropHistogramBinomDataset(Dataset):
         hist, bin_edges_tensor = generate_histograms_torch(spp1_samples, self.hist_bins, self.device, log_binning=True)
 
         # BINOMIAL SPLIT
-        # target_sample = random.choice([4, 8, 12, 16, 20])                     
+        # target_sample = random.choice([4, 8, 12, , 20])                     
         # discarded because even if it augments it confuses the model (uncomment if confidence is added)
-        target_sample = 16
-        p = torch.tensor(min(target_sample / (self.low_spp + 1e-8), 1.0))       # Binom Probability 
+        p = torch.tensor(min(self.target_sample / (self.low_spp + 1e-8), 1.0))       # Binom Probability 
         binom = torch.distributions.Binomial(total_count=hist, probs=p)         # Binom Sampling
         target_hist = binom.sample()
         input_hist = hist - target_hist

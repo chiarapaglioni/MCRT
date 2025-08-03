@@ -130,7 +130,7 @@ def evaluate_sample(model, input_tensor, clean_tensor):
 
 
 # TRAINING STEP
-def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, epoch=None, debug=True, plot_every_n=10):
+def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, n_bins, epoch=None, debug=True, plot_every_n=10):
     model.train()
     total_loss = 0
 
@@ -141,11 +141,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, 
         optimizer.zero_grad()
 
         if mode == "hist":
-            x_hist = hdr_input[:, :3*16]                        # (B, 48, H, W)
-            x_spatial = hdr_input[:, 3*16:, :, :]               # (B, 6, H, W)
-            pred = model(x_spatial, x_hist)                     # B, 3, H, W (HDR space)
+            x_hist = hdr_input[:, :3*n_bins]                        # (B, 48, H, W)
+            x_spatial = hdr_input[:, 3*n_bins:, :, :]               # (B, 6, H, W)
+            pred = model(x_spatial, x_hist)                         # B, 3, H, W (HDR space)
         else:
-            pred = model(hdr_input)                             # B, 3, H, W (HDR space)
+            pred = model(hdr_input)                                 # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
         if batch_idx % 50 == 0:
@@ -173,7 +173,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, 
 
 
 # VALIDATION STEP
-def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, plot_every_n, debug=False):
+def validate_epoch(model, dataloader, criterion, device, tonemap, mode, n_bins, epoch, plot_every_n, debug=False):
     model.eval()
     total_loss = 0
     total_psnr = 0
@@ -188,16 +188,15 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
             clean = batch['clean'].to(device)               # B, 3, H, W
 
             if mode == "hist":
-                # TODO: set bin size 16 to be configurable :)
-                x_hist = hdr_input[:, :3*16]                    # (B, 48, H, W)
-                x_spatial = hdr_input[:, 3*16:, :, :]           # (B, 6, H, W)                  
+                x_hist = hdr_input[:, :3*n_bins]                    # (B, 48, H, W)
+                x_spatial = hdr_input[:, 3*n_bins:, :, :]           # (B, 6, H, W)                  
 
                 # PREDICTION
                 pre_agg_pred = model(x_spatial, x_hist)         # B, 3, H, W (HDR space)
                 
                 # AGGREGATOR
                 pred = aggregator(output=pre_agg_pred, features=[(x_hist, 0.3)])                      # hist only
-                pred_img  = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
+                # pred_img  = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
                 # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2), (x_hist, 0.3)])  # hybrid
             else:
                 pred = model(hdr_input)                             # B, 3, H, W (HDR space)
@@ -215,13 +214,14 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, epoch, p
 
             # DEBUG (plot the first batch)
             if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
-                # TODO: make this more flexible!!
-                input_rgb = hdr_input[:, :3] if hdr_input.shape[1] <= 10 else hdr_input[:, 48:51]  # shape: [10, 3, 128, 128]
+                start = 3 * n_bins
+                end = start + 3
+                input_rgb = hdr_input[:, :3] if hdr_input.shape[1] <= 10 else hdr_input[:, start:end]  # shape: [10, 3, 128, 128]
                 plot_debug_aggregation(pre_agg_pred, pred, input_rgb, clean, epoch)
                 
                 # randomly pick one index from the batch
-                random_idx = random.randint(0, pred.shape[0] - 1)
-                plot_aggregation_analysis(pre_agg_pred, pred, pred_img, clean, epoch, idx=random_idx)
+                # random_idx = random.randint(0, pred.shape[0] - 1)
+                # plot_aggregation_analysis(pre_agg_pred, pred, pred_img, clean, epoch, idx=random_idx)
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count
@@ -314,8 +314,8 @@ def train_model(config):
     for epoch in range(config["num_epochs"]):
         start_time = time.time()
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
-        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], n_bins=dataset_cfg["hist_bins"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
+        val_loss, val_psnr = validate_epoch(model, val_loader, criterion, device, tonemap=dataset_cfg['tonemap'], mode=dataset_cfg["mode"], n_bins=dataset_cfg["hist_bins"], epoch=epoch, debug=dataset_cfg['debug'], plot_every_n=config['plot_every'])
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)

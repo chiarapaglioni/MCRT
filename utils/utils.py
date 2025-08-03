@@ -6,6 +6,7 @@ import pickle
 import logging
 import tifffile
 import numpy as np
+from PIL import Image
 import matplotlib.pyplot as plt
 # Models
 from model.UNet import GapUNet
@@ -98,6 +99,34 @@ def tonemap_gamma_correct(hdr_image, gamma=2.2):
     display_img = np.power(np.clip(tone_mapped, 0, 1), 1.0 / gamma) # Gamma correction
     return display_img
 
+
+def load_image_tensor(scene_folder, scene_key, name):
+    """
+    Load a TIFF image as a tensor given the scene folder, scene key, and name pattern.
+
+    Args:
+        scene_folder (str): Path to the folder containing the scene files.
+        scene_key (str): The scene identifier prefix.
+        name (str): Pattern string to identify the specific file.
+
+    Returns:
+        torch.Tensor: Float tensor of shape (C, H, W) normalized to [0,1].
+    """
+    all_files = os.listdir(scene_folder)
+    matched_file = None
+
+    for f in all_files:
+        if f.startswith(scene_key) and name in f and f.endswith('.tiff'):
+            matched_file = f
+            break
+
+    if matched_file is None:
+        raise FileNotFoundError(f"Missing TIFF file for scene '{scene_key}' with pattern '{name}' in {scene_folder}")
+
+    path = os.path.join(scene_folder, matched_file)
+    img = Image.open(path)
+    tensor = TF.to_tensor(img)  # Converts to float tensor (C, H, W), range [0,1]
+    return tensor
 
 
 def plot_images(noisy, init_psnr, hist_pred, hist_psnr, img_pred, img_psnr, target, clean=None, save_path=None, correct=False):

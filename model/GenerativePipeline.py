@@ -690,7 +690,8 @@ def plot_input_vs_prediction(input_hist, predicted_logits, bin_edges, clean_img=
     predicted_probs = torch.softmax(predicted_logits, dim=2)  # (B, C, bins, H, W)
 
     # Decode histograms into RGB images
-    input_hist = input_hist[:, :, :16, :, :]  # Remove confidence bin
+    bins = bin_edges.shape[-1] - 1
+    input_hist = input_hist[:, :, :bins, :, :]                                     # Remove stats bins
     input_rgb_img = decode_image_from_probs(input_hist, bin_edges)                 # (B,C,H,W)
     pred_rgb_img = decode_image_from_probs(predicted_probs, bin_edges)             # (B,C,H,W)
 

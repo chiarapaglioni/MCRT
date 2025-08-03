@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 # CONVOLUTIONS
 def conv3x3(in_channels, out_channels, stride=1, padding=1, bias=True):
     return nn.Conv2d(
@@ -123,15 +127,12 @@ class GapUNet(nn.Module):
 
         # INPUT CHANNELS
         if self.mode == 'hist':
-            if out_mode == 'dist':
-                # self.input_channels = in_channels * self.n_bins_input       # original histogram
-                self.input_channels = in_channels * self.n_bins_input         # +3 for confidence
-            elif out_mode == 'mean':
-                self.input_channels = in_channels * self.n_bins_input       # (n_bins + 2)    # bins + mean + var
-            else:
-                raise ValueError(f"Unsupported out_mode: {out_mode}")
+            self.input_channels = in_channels * self.n_bins_input
         else:  # 'img' mode
             self.input_channels = in_channels
+
+        logger.info(f"Input Channels: {self.n_bins_input}")
+        logger.info(f"Output Channels: {self.n_bins_output}")
 
         # ENCODER
         in_ch = self.input_channels
