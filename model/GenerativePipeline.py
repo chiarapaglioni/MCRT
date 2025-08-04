@@ -198,7 +198,7 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
     total_psnr = 0.0
     count = 0
 
-    aggregator = PatchAggregator(kernel_size=7, sigma_color=0.1)
+    # aggregator = PatchAggregator(kernel_size=7, sigma_color=0.1)
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -224,7 +224,7 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
 
             # AGGREGATOR
             guidance_feature = input_hist.view(input_hist.size(0), -1, input_hist.size(-2), input_hist.size(-1))  # (B, C*bins, H, W)
-            pred = aggregator(output=pred_rgb_img, features=[(guidance_feature, 0.3)])
+            # pred = aggregator(output=pred_rgb_img, features=[(guidance_feature, 0.3)])
 
             # DEBUG (stats)
             if count % 5 == 0:
@@ -249,7 +249,7 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
             # DEBUG (images)
             if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
                 input_rgb = decode_image_from_probs(input_hist[:, :, :n_bins, :, :], bin_edges)
-                plot_debug_aggregation(pred_rgb_img, pred, input_rgb, clean_img, epoch, debug_dir="debug_plots_gen")
+                # plot_debug_aggregation(pred_rgb_img, pred, input_rgb, clean_img, epoch, debug_dir="debug_plots_gen")
 
     avg_loss = total_loss / len(dataloader)
     avg_psnr = total_psnr / count if count > 0 else 0.0

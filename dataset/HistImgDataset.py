@@ -478,9 +478,8 @@ class HistogramBinomDataset(Dataset):
         self.target_sample = target_sample
 
         self.clean_images = {}          # clean images for PSNR
-        self.spp1_images = {}
         self.scene_paths = {}
-        self.global_bin_counts = torch.zeros(self.hist_bins)
+        self.cached_data = {}
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
             os.makedirs(self.cached_dir)
@@ -517,7 +516,27 @@ class HistogramBinomDataset(Dataset):
             assert spp1_file is not None, f"Missing spp1 file for scene {key}"
             spp1_path = os.path.join(folder, spp1_file)
             spp1_samples = tifffile.imread(spp1_path)                                                  # (low_spp, H, W, 3)
-            self.spp1_images[key] = torch.from_numpy(spp1_samples).permute(0, 3, 1, 2).float()         # (N, 3, H, W)
+            spp1_samples = torch.from_numpy(spp1_samples).permute(0, 3, 1, 2).float()         # (N, 3, H, W)
+            
+            # hist shape: (3, H, W, B)
+            # edges shape: (3, H, W, B)
+            hist, bin_edges = load_or_compute_histograms(
+                key=key,
+                spp1_tensor=spp1_samples,
+                hist_bins=self.hist_bins,
+                device=self.device,
+                cached_dir=self.cached_dir,
+                log_binning=True,
+                normalize=False
+            ) 
+
+            stats = generate_hist_statistics(spp1_samples, return_channels='all')
+            pixel_mean = stats['mean']                                                      # (3, H, W)
+            rel_var = stats['relative_variance']                                            # (3, H, W)
+
+            self.cached_data[key] = {
+                "hist": hist, "bin_edges": bin_edges, "mean": pixel_mean, "rel_var": rel_var
+            }
 
             # Load clean image for target
             clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
@@ -531,7 +550,7 @@ class HistogramBinomDataset(Dataset):
             }
 
             # Split spp1 samples into input and target sets
-            assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
+            # assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 
             # Proportion of samples to allocate to target
             p = self.target_sample / (self.low_spp + 1e-8)
@@ -542,20 +561,10 @@ class HistogramBinomDataset(Dataset):
         return self.virt_size
 
     def __getitem__(self, idx, crop_coords=None):
-        scene = self.scene_names[idx % len(self.scene_names)]                   
-        spp1_samples = self.spp1_images[scene]                # shape: (N, 3, H, W)
-
-        # hist shape: (3, H, W, B)
-        # edges shape: (3, H, W, B)
-        hist, bin_edges = load_or_compute_histograms(
-            key=scene,
-            spp1_tensor=spp1_samples,
-            hist_bins=self.hist_bins,
-            device=self.device,
-            cached_dir=self.cached_dir,
-            log_binning=True,
-            normalize=False
-        ) 
+        scene = self.scene_names[idx % len(self.scene_names)] 
+        scene_cache = self.cached_data[scene]
+        hist = scene_cache['hist']
+        bin_edges = scene_cache['bin_edges']
 
         # CROP
         if self.crop_size:
@@ -565,7 +574,6 @@ class HistogramBinomDataset(Dataset):
             else:
                 i, j, h, w = crop_coords
             hist = hist[:, i:i+h, j:j+w, :]                   # (3, H, W, B)
-            spp1_samples = spp1_samples[:, :, i:i+h, j:j+w]   # (3, H, W, B)
 
         # CLEAN
         clean_tensor = None
@@ -575,7 +583,6 @@ class HistogramBinomDataset(Dataset):
             clean_tensor = torch.from_numpy(clean_img).permute(2, 0, 1).float()
             if self.crop_size:
                 clean_tensor = clean_tensor[:, i:i+h, j:j+w]
-
 
         # Randomize target_sample each time (currently discarded because it adds more noise)
         # target_sample = random.choice([8, 12, , 20, 24])
@@ -593,12 +600,8 @@ class HistogramBinomDataset(Dataset):
 
         # MEAN and RELATIVE VARIANCE from samples
         if self.stat:
-            stats = generate_hist_statistics(spp1_samples, return_channels='all')
-            pixel_mean = stats['mean']                                                      # (3, H, W)
-            rel_var = stats['relative_variance']                                            # (3, H, W)
-
-            pixel_mean_expanded = pixel_mean.unsqueeze(1)                                   # (3, 1, H, W)
-            rel_var_expanded = rel_var.unsqueeze(1)                                         # (3, 1, H, W)
+            pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)                              # (3, 1, H, W)
+            rel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)                              # (3, 1, H, W)
 
             input_tensor = torch.cat([input_tensor, pixel_mean_expanded, rel_var_expanded], dim=1)   # (3, B+2, H, W)
 
