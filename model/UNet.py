@@ -176,6 +176,8 @@ class GapUNet(nn.Module):
             # input is already (B, 3, H, W)
             pass
 
+        logger.info(f"Input Shape: {x.shape}")
+
         encoder_outs = []
 
         # Encoder
@@ -194,4 +196,5 @@ class GapUNet(nn.Module):
             B, _, H, W = out.shape
             out = out.view(B, 3, self.n_bins_output, H, W)
 
+        logger.info(f"Output Shape: {out.shape}")
         return out

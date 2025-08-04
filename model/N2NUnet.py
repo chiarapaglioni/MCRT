@@ -129,6 +129,7 @@ class N2Net(nn.Module):
         spatial_x = x[:, :self.spatial_in_channels, :, :]
         x = spatial_x  # no concat here
 
+        logger.info(f"Input Shape: {x.shape}")
         residual_connection = [x]
 
         # ---- ENCODER ----
@@ -174,6 +175,7 @@ class N2Net(nn.Module):
 
         if self.out_mode == 'dist':
             x = x.view(B, 3, self.hist_bins, H, W)
+        logger.info(f"Output Shape: {x.shape}")
         return x
 
     def _initialize_weights(self):

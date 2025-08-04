@@ -10,13 +10,14 @@ dataset:
   virt_size: 1000                       # number of crops to generate across all the scenes
   clean: true                           # whether to include 'clean' targets if available
   debug: true                           # saves plot to output save_dir for debugging
-  stat: true                            # whether to include mean and var value alongside histogram (helps with colour reconstruction)
+  stat: false                           # whether to include mean and var value alongside histogram (helps with colour reconstruction)
   target_sample: 32                     # number of samples assigned to target (out of low_spp samples)
+  log_bins: true                       # whether to use histogram with log or linear binning
 
 model:
-  model_name: n2n
-  in_channels: 39                       # same as n_bins_input because we want to feed the whole hist to the model
-  n_bins_input: 39                      # hist_bins if only using hist, else 34 if using other stats or 39 if cov + mean
+  model_name: gap
+  in_channels: 3                        # if using n2n model same as n_bins_input because we want to feed the whole hist to the model
+  n_bins_input: 32                      # hist_bins if only using hist, else 34 if using other stats or 39 if cov + mean
   out_mode: dist                        # 'mean' or 'dist' to output RGB image or distrbution
   merge_mode: concat                    # 'add' or 'concat'
   depth: 5                              # number of encoder/decoder blocks
@@ -29,7 +30,7 @@ num_workers: 4
 shuffle: true
 pin_memory: false
 crop: false                             # whether to compute bin edges per crop or per image 
-loss: ce                                # 'ce' or 'kl'
+loss: ce                                # 'ce' or 'kl' OR 'wass'
 
 val_split: 0.1                          # 10% validation split
 

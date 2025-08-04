@@ -278,9 +278,8 @@ class HistogramDataset(Dataset):
                  data_augmentation: bool = True, crops_per_scene: int = 1000,
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
                  clean: bool = False, aov: bool = False, cached_dir: str = None, debug: bool = False,
-                 device: str = None, scene_names=None,
-                 supervised: bool = False, tonemap: str = None, target_split: int = 1, run_mode: str = None,
-                 use_cached_crops: bool = False):
+                 device: str = None, scene_names=None, supervised: bool = False, tonemap: str = None, 
+                 target_split: int = 1, run_mode: str = None, use_cached_crops: bool = False, log_bins: bool = False):
         
         self.root_dir = root_dir
         self.crop_size = crop_size
@@ -299,6 +298,7 @@ class HistogramDataset(Dataset):
         self.run_mode = run_mode
         self.use_cached_crops = use_cached_crops
         self.supervised = supervised
+        self.log_bins = log_bins
         if self.supervised:
             logger.info("Supervised (noise2clean) mode")
         else:
@@ -396,7 +396,7 @@ class HistogramDataset(Dataset):
             hist_bins=self.hist_bins,
             device=self.device,
             cached_dir=self.cached_dir,
-            log_binning=True
+            log_binning=self.log_bins
         )
         hist_tensor = hist[:, i:i+h, j:j+w, :]  # (3, H, W, bins)
 
@@ -460,7 +460,7 @@ class HistogramBinomDataset(Dataset):
                  hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
                  high_spp: int = 4500, cached_dir: str = None,
                  debug: bool = False, mode: str = None, device: str = None, scene_names=None, 
-                 target_sample: int = 1, stat: bool = True):
+                 target_sample: int = 1, stat: bool = True, log_bins = True):
         
         self.root_dir = root_dir
         self.crop_size = crop_size
@@ -476,6 +476,7 @@ class HistogramBinomDataset(Dataset):
         self.device = device
         logger.info(f"Using device Data Loader: {self.device}")
         self.target_sample = target_sample
+        self.log_bins = log_bins
 
         self.clean_images = {}          # clean images for PSNR
         self.scene_paths = {}
@@ -526,7 +527,7 @@ class HistogramBinomDataset(Dataset):
                 hist_bins=self.hist_bins,
                 device=self.device,
                 cached_dir=self.cached_dir,
-                log_binning=True,
+                log_binning=self.log_bins,
                 normalize=False
             ) 
 

@@ -86,7 +86,34 @@ class KLDivergenceLoss(nn.Module):
         else:
             return kl_loss  # shape (N,)
 
+# WASSERSTEIN
+class WassersteinLoss(nn.Module):
+    def __init__(self, reduction='mean'):
+        super(WassersteinLoss, self).__init__()
+        self.reduction = reduction
 
+    def forward(self, pred, target):
+        """
+        pred:   Tensor of shape [N, bins], where N = B*C*H*W
+        target: Tensor of same shape
+        """
+        # Ensure valid probability distributions
+        pred = pred / (pred.sum(dim=1, keepdim=True) + 1e-8)
+        target = target / (target.sum(dim=1, keepdim=True) + 1e-8)
+
+        # Compute CDFs
+        cdf_pred = torch.cumsum(pred, dim=1)
+        cdf_target = torch.cumsum(target, dim=1)
+
+        # Wasserstein distance = mean absolute difference of CDFs
+        emd = torch.abs(cdf_pred - cdf_target).mean(dim=1)
+
+        if self.reduction == 'mean':
+            return emd.mean()
+        elif self.reduction == 'sum':
+            return emd.sum()
+        else:
+            return emd  # [N]
 
 # DATA LOADERS
 def get_generative_dataloaders(config, device):
@@ -302,8 +329,10 @@ def train_histogram_generator(config):
         loss_fn = CustomCrossEntropyLoss()
     elif config['loss']=='kl':
         loss_fn = KLDivergenceLoss()
+    elif config['loss']=='wass':
+        loss_fn = WassersteinLoss()
 
-        logger.info(f"Using loss {config['loss'].upper()}")
+    logger.info(f"Using loss {config['loss'].upper()}")
 
     # OPTIMIZER & LR SCHEDULER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
@@ -319,6 +348,7 @@ def train_histogram_generator(config):
     save_path = Path(config["save_dir"]) / model_name
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
+    logger.info(f"Histograms with Log Binning: {dataset_cfg['log_bins']}")
     logger.info("Starting DISTRIBUTION training...")
 
     for epoch in range(config["num_epochs"]):
