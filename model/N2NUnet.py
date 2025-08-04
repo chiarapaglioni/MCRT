@@ -23,9 +23,10 @@ class ConvBlockLeakyRelu(nn.Module):
 
 
 class N2Net(nn.Module):
-    def __init__(self, in_channels=9, hist_bins=8, mode="img"):
+    def __init__(self, in_channels=9, hist_bins=8, mode="img", out_mode="dist"):
         super(N2Net, self).__init__()
         self.mode = mode
+        self.out_mode = out_mode
         self.hist_bins = hist_bins
         self.hist_encoder_out_channels = 8  # fixed size after encoding
         logger.info(f"Initialized N2Net with mode={self.mode}, input_channels={in_channels}")
@@ -33,7 +34,7 @@ class N2Net(nn.Module):
         # INPUT CHANNELS
         if self.mode == "hist":
             hist_channels = 3 * hist_bins
-            self.spatial_in_channels = in_channels - hist_channels
+            self.spatial_in_channels = in_channels # - hist_channels
             # TODO: currently commented out histogram encoding as it is not giving good results 
             # self.hist_encoder = HistogramEncoder(bins_per_channel=hist_bins, out_features=self.hist_encoder_out_channels)
             logger.info(f"Hist input_channels={hist_channels}")
@@ -56,6 +57,9 @@ class N2Net(nn.Module):
         # Change encoder/decoder input channels based on the mode!
         first_encoder_input_channels = self.spatial_in_channels
         first_decoder_input_channels = bw2 + self.spatial_in_channels
+        last_decoder_out_channels = 3 * self.hist_bins if self.out_mode=="dist" else 3
+
+        logger.info(f"Out Mode: {out_mode.upper()} - Output Channels:{last_decoder_out_channels}")
 
         # ---- ENCODER ----
         self.enc_conv01 = nn.Sequential(
@@ -109,15 +113,18 @@ class N2Net(nn.Module):
         self.dec_conv1abc = nn.Sequential(
             ConvBlockLeakyRelu(first_decoder_input_channels, final_bw, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(final_bw, final_bw // 2, 3, stride=1, padding=1),
-            nn.Conv2d(final_bw // 2, 3, 3, stride=1, padding=1, bias=True)
+            nn.Conv2d(final_bw // 2, last_decoder_out_channels, 3, stride=1, padding=1, bias=True)
         )
 
         self._initialize_weights()
 
     def forward(self, x, x_hist=None):
-        if self.mode == "hist":
-            assert x_hist is not None, "Histogram input required in hist mode"
+        # if self.mode == "hist":
+            # assert x_hist is not None, "Histogram input required in hist mode"
             # hist_feat = self.hist_encoder(x_hist)  # [B, D]
+        B, C, bins, H, W = x.shape
+        if self.out_mode=="dist":
+            x = x.view(B, C * bins, H, W)
 
         spatial_x = x[:, :self.spatial_in_channels, :, :]
         x = spatial_x  # no concat here
@@ -165,6 +172,8 @@ class N2Net(nn.Module):
         x = torch.cat([x, residual_connection.pop()], dim=1)
         x = self.dec_conv1abc(x)
 
+        if self.out_mode == 'dist':
+            x = x.view(B, 3, self.hist_bins, H, W)
         return x
 
     def _initialize_weights(self):

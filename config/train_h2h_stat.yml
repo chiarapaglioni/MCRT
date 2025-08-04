@@ -14,8 +14,8 @@ dataset:
   target_sample: 32                     # number of samples assigned to target (out of low_spp samples)
 
 model:
-  model_name: gap
-  in_channels: 3                        # 3 by default
+  model_name: n2n
+  in_channels: 39                       # same as n_bins_input because we want to feed the whole hist to the model
   n_bins_input: 39                      # hist_bins if only using hist, else 34 if using other stats or 39 if cov + mean
   out_mode: dist                        # 'mean' or 'dist' to output RGB image or distrbution
   merge_mode: concat                    # 'add' or 'concat'
@@ -25,15 +25,15 @@ model:
 
 # General DataLoader settings
 batch_size: 16
-num_workers: 8
+num_workers: 4
 shuffle: true
 pin_memory: false
 crop: false                             # whether to compute bin edges per crop or per image 
-loss: kl                                # 'ce' or 'kl'
+loss: ce                                # 'ce' or 'kl'
 
 val_split: 0.1                          # 10% validation split
 
 # training
 num_epochs: 100
-plot_every: 10                          # how often to save the debug plots
+plot_every: 1                          # how often to save the debug plots
 save_dir: checkpoints

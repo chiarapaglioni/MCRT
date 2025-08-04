@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 # Custom
+from model.N2NUnet import N2Net
 from model.UNet import GapUNet
 from dataset.HistImgDataset import CropHistogramBinomDataset, HistogramBinomDataset
 from dataset.HistImgPatchAggregator import PatchAggregator
@@ -277,17 +278,25 @@ def train_histogram_generator(config):
     n_bins = dataset_cfg["hist_bins"]
 
     # MODEL
-    model = GapUNet(
-        in_channels=model_cfg["in_channels"],
-        n_bins_input=model_cfg["n_bins_input"],
-        n_bins_output=dataset_cfg['hist_bins'],
-        out_mode=model_cfg["out_mode"],
-        merge_mode=model_cfg["merge_mode"],
-        depth=model_cfg["depth"],
-        start_filters=model_cfg["start_filters"],
-        mode=dataset_cfg["mode"]
-    ).to(device)
+    if model_cfg['model_name'] == 'gap':
+        model = GapUNet(
+            in_channels=model_cfg["in_channels"],
+            n_bins_input=model_cfg["n_bins_input"],
+            n_bins_output=dataset_cfg['hist_bins'],
+            out_mode=model_cfg["out_mode"],
+            merge_mode=model_cfg["merge_mode"],
+            depth=model_cfg["depth"],
+            start_filters=model_cfg["start_filters"],
+            mode=dataset_cfg["mode"]
+        ).to(device)
 
+    elif model_cfg['model_name'] == 'n2n':
+        model = N2Net(
+            in_channels=model_cfg["in_channels"],       # total channels: histogram + spatial
+            hist_bins=dataset_cfg["hist_bins"],         # how many bins per channel
+            mode="hist"
+        ).to(device)
+    
     # LOSS
     if config['loss']=='ce':
         loss_fn = CustomCrossEntropyLoss()
