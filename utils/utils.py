@@ -13,6 +13,7 @@ from model.UNet import GapUNet
 from model.N2NUnet import N2Net
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+from dataset.HistogramGenerator import generate_histograms_torch
 
 # Logger
 import logging
@@ -98,6 +99,51 @@ def tonemap_gamma_correct(hdr_image, gamma=2.2):
     tone_mapped = hdr_image / (1.0 + hdr_image)                     # Reinhard tone mapping
     display_img = np.power(np.clip(tone_mapped, 0, 1), 1.0 / gamma) # Gamma correction
     return display_img
+
+
+def load_or_compute_histograms(key: str, spp1_tensor: torch.Tensor, hist_bins: int, device: str = "cpu", cached_dir: str = None, log_binning: bool = True, normalize: bool = True):
+    """
+    Load or compute histograms for a given scene.
+
+    Parameters:
+        key (str): Scene key or name.
+        spp1_tensor (torch.Tensor): Input samples, shape (N, C, H, W).
+        hist_bins (int): Number of histogram bins.
+        device (str): Device to run histogram computation on.
+        cached_dir (str or None): Directory to use for caching.
+        log_binning (bool): Whether to use logarithmic binning.
+        normalize (bool): Whether to normalize histogram counts to [0, 1].
+
+    Returns:
+        hist (torch.Tensor): Histogram tensor of shape (C, H, W, B).
+        bin_edges (torch.Tensor): Corresponding bin edges of shape (B+1,).
+    """
+    cache_path = None
+    if cached_dir:
+        os.makedirs(cached_dir, exist_ok=True)
+        cache_path = os.path.join(
+            cached_dir, f"{key}_histogram_{hist_bins}bins{'_log' if log_binning else ''}.pt"
+        )
+
+    if cache_path and os.path.exists(cache_path):
+        cached_data = torch.load(cache_path, map_location="cpu")
+        hist = cached_data["hist_features"]
+        bin_edges = cached_data["bin_edges"]
+        # logger.info(f"[Cache] Loaded histograms for '{key}' from '{cache_path}'")
+    else:
+        # Compute histograms
+        hist, bin_edges = generate_histograms_torch(
+            spp1_tensor, hist_bins, device, log_binning=log_binning
+        )
+        if cache_path:
+            torch.save({"hist_features": hist, "bin_edges": bin_edges}, cache_path)
+            # logger.info(f"[Cache] Saved histograms for '{key}' to '{cache_path}'")
+
+    # NORMALISE (after loading/generating the histogram)
+    if normalize:
+        hist_sum = hist.sum(dim=-1, keepdim=True) + 1e-8
+        hist = hist / hist_sum
+    return hist, bin_edges
 
 
 def load_image_tensor(scene_folder, scene_key, name):

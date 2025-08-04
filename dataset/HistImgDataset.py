@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from torchvision import transforms
 from torch.utils.data import Dataset
 # Utils
-from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches
-from dataset.HistogramGenerator import generate_histograms, generate_histograms_torch, generate_hist_statistics
+from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms
+from dataset.HistogramGenerator import generate_histograms_torch, generate_hist_statistics
 
 import logging
 logger = logging.getLogger(__name__)
@@ -343,31 +343,6 @@ class HistogramDataset(Dataset):
                     spp1_tensor = torch.from_numpy(spp1_img).permute(0, 3, 1, 2).float()  # (N,3,H,W)
                     self.spp1_images[key] = spp1_tensor
                 
-                    # HISTOGRAMS
-                    cache_path = os.path.join(self.cached_dir, f"{key}_histogram_{self.hist_bins}bins.pt") if self.cached_dir else None
-                    if cache_path and os.path.exists(cache_path):
-                        # Load cached histograms
-                        cached_data = torch.load(cache_path)
-                        self.hist_features[key] = cached_data["hist_features"]
-                        self.bin_edges[key] = cached_data["bin_edges"]
-                        logger.info(f"Loaded cached histograms for scene '{key}'")
-                    else:
-                        # Compute histograms (replace with your own function)
-                        hist, bin_edges = generate_histograms_torch(spp1_tensor, self.hist_bins, self.device, log_binning=True)
-                        hist_sum = torch.sum(hist, dim=-1, keepdim=True) + 1e-8
-                        hist_norm = hist / hist_sum  # Normalize
-
-                        self.hist_features[key] = hist_norm
-                        self.bin_edges[key] = bin_edges
-
-                        # Save to cache if caching enabled
-                        if cache_path:
-                            torch.save({
-                                "hist_features": hist_norm,
-                                "bin_edges": bin_edges
-                            }, cache_path)
-                            logger.info(f"Computed and cached histograms for scene '{key}'")
-
                     # For each scene, sample patch coords based on variance or some heuristic
                     # You can load only noisy image for variance calculation here or skip and cache patch coords externally.
                     noisy_img = tifffile.imread(self.scene_paths[key]["noisy"])
@@ -392,15 +367,17 @@ class HistogramDataset(Dataset):
 
         paths = self.scene_paths[scene]
 
-        # Load stored images
-        spp1_img = self.spp1_images[scene]  # (N, H, W, 3)
-        noisy_tensor = self.noisy_images[scene][:, i:i+h, j:j+w]      # (H, W, 3)
+        # NOISY
+        spp1_img = self.spp1_images[scene]                          # (N, H, W, 3)
+        noisy_tensor = self.noisy_images[scene][:, i:i+h, j:j+w]    # (H, W, 3)
 
+        # CLEAN
         clean_tensor = None
         if self.clean and paths["clean"] is not None:
             clean_img = tifffile.imread(paths["clean"])
             clean_tensor = torch.from_numpy(clean_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
 
+        # AOV
         albedo_tensor, normal_tensor = None, None
         if self.aov:
             if paths["albedo"]:
@@ -412,11 +389,16 @@ class HistogramDataset(Dataset):
                 normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
                 normal_tensor = (normal_tensor + 1.0) * 0.5
 
-        # Generate histograms on the fly
-        hist, bin_edges = self.hist_features[scene], self.bin_edges[scene]
-        hist_sum = torch.sum(hist, dim=-1, keepdim=True) + 1e-8
-        hist_norm = hist / hist_sum
-        hist_tensor = hist_norm[:, i:i+h, j:j+w, :]  # (3, H, W, bins)
+        # HISTOGRAMS
+        hist, bin_edges = load_or_compute_histograms(
+            key=scene,
+            spp1_tensor=spp1_img,
+            hist_bins=self.hist_bins,
+            device=self.device,
+            cached_dir=self.cached_dir,
+            log_binning=True
+        )
+        hist_tensor = hist[:, i:i+h, j:j+w, :]  # (3, H, W, bins)
 
         # Input/target split (random shuffle)
         indices = list(range(self.low_spp))
@@ -495,11 +477,8 @@ class HistogramBinomDataset(Dataset):
         logger.info(f"Using device Data Loader: {self.device}")
         self.target_sample = target_sample
 
-        self.hist_features = {}      # input histograms (from spp1 samples)
-        self.target_histograms = {}  # target histograms (from clean image)
-        self.clean_images = {}       # clean images for PSNR
+        self.clean_images = {}          # clean images for PSNR
         self.spp1_images = {}
-        self.bin_edges = {}
         self.scene_paths = {}
         self.global_bin_counts = torch.zeros(self.hist_bins)
 
@@ -544,45 +523,39 @@ class HistogramBinomDataset(Dataset):
             clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
             assert clean_file is not None, f"Missing clean file for scene {key}"
             clean_path = os.path.join(folder, clean_file)
-            clean_img = tifffile.imread(clean_path)  # shape: (H, W, 3)
-            self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()
 
-            self.scene_paths[key] = folder
+            self.scene_paths[key] = {
+                "folder": folder,
+                "spp1_path": spp1_path,
+                "clean_path": clean_path
+            }
 
             # Split spp1 samples into input and target sets
             assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
 
-            # HISTOGRAM GENERATION
-            hist, bin_edges = generate_histograms_torch(self.spp1_images[key], self.hist_bins, self.device, log_binning=True)
-            self.hist_features[key] = hist
-            self.bin_edges[key] = bin_edges
-
             # Proportion of samples to allocate to target
-            # p = self.target_sample / (self.low_spp + 1e-8)
-            # self.p = torch.tensor(min(p, 1.0))  # Ensure in [0, 1]
-
-            # 1. Collapse spatial dimensions and channels to get total bin counts
-            bin_counts = hist.sum(dim=(0, 1, 2))  # shape: (B,)
-            self.global_bin_counts += bin_counts
-
-        # 2. Normalize to get bin frequencies
-        bin_freqs = self.global_bin_counts / (self.global_bin_counts.sum() + 1e-8)  # shape: (B,)
-        # 3. Invert frequencies to get weights (less frequent bins = higher weight)
-        # 4. Normalize weights (here we also apply log to make bins more balanced since histograms are skewed)
-        bin_weights = torch.log1p(1.0 / (bin_freqs + 1e-8))
-        self.bin_weights = bin_weights / bin_weights.sum()
+            p = self.target_sample / (self.low_spp + 1e-8)
+            self.p = torch.tensor(min(p, 1.0))  # Ensure in [0, 1]
 
 
     def __len__(self):
         return self.virt_size
 
     def __getitem__(self, idx, crop_coords=None):
-        scene = self.scene_names[idx % len(self.scene_names)]
-        hist = self.hist_features[scene]                      # shape: (3, H, W, B)
-        clean_tensor = self.clean_images[scene]               # shape: (3, H, W)
+        scene = self.scene_names[idx % len(self.scene_names)]                   
         spp1_samples = self.spp1_images[scene]                # shape: (N, 3, H, W)
-        bin_edges_tensor = self.bin_edges[scene]
-        bin_weights_tensor = self.bin_weights
+
+        # hist shape: (3, H, W, B)
+        # edges shape: (3, H, W, B)
+        hist, bin_edges = load_or_compute_histograms(
+            key=scene,
+            spp1_tensor=spp1_samples,
+            hist_bins=self.hist_bins,
+            device=self.device,
+            cached_dir=self.cached_dir,
+            log_binning=True,
+            normalize=False
+        ) 
 
         # CROP
         if self.crop_size:
@@ -592,14 +565,22 @@ class HistogramBinomDataset(Dataset):
             else:
                 i, j, h, w = crop_coords
             hist = hist[:, i:i+h, j:j+w, :]                   # (3, H, W, B)
-            clean_tensor = clean_tensor[:, i:i+h, j:j+w]      # (3, H, W)
             spp1_samples = spp1_samples[:, :, i:i+h, j:j+w]   # (3, H, W, B)
+
+        # CLEAN
+        clean_tensor = None
+        if self.clean:
+            clean_path = self.scene_paths[scene]["clean_path"]
+            clean_img = tifffile.imread(clean_path)
+            clean_tensor = torch.from_numpy(clean_img).permute(2, 0, 1).float()
+            if self.crop_size:
+                clean_tensor = clean_tensor[:, i:i+h, j:j+w]
 
 
         # Randomize target_sample each time (currently discarded because it adds more noise)
         # target_sample = random.choice([8, 12, , 20, 24])
-        p = torch.tensor(min(self.target_sample / (self.low_spp + 1e-8), 1.0))              # Compute binomial sampling probability
-        binom = torch.distributions.Binomial(total_count=hist, probs=p)                     # Generate binomial input and target histograms
+        # p = torch.tensor(min(self.target_sample / (self.low_spp + 1e-8), 1.0))              # Compute binomial sampling probability
+        binom = torch.distributions.Binomial(total_count=hist, probs=self.p)                     # Generate binomial input and target histograms
         target_hist = binom.sample()
         input_hist = hist - target_hist
 
@@ -621,7 +602,6 @@ class HistogramBinomDataset(Dataset):
 
             input_tensor = torch.cat([input_tensor, pixel_mean_expanded, rel_var_expanded], dim=1)   # (3, B+2, H, W)
 
-
         # DATA AUGMENTATION
         if self.data_augmentation:
             if random.random() > 0.5:
@@ -638,8 +618,7 @@ class HistogramBinomDataset(Dataset):
             "target_hist": target_tensor,
             "clean": clean_tensor,
             "scene": scene,
-            "bin_edges": bin_edges_tensor,
-            "bin_weights": bin_weights_tensor,
+            "bin_edges": bin_edges,
             "crop_coords": (i, j, h, w) if self.crop_size else None
         }
 
@@ -672,7 +651,6 @@ class CropHistogramBinomDataset(Dataset):
         self.target_sample = target_sample
 
         self.hist_features = {}      # input histograms (from spp1 samples)
-        self.target_histograms = {}  # target histograms (from clean image)
         self.clean_images = {}       # clean images for PSNR
         self.bin_edges = {}
         self.scene_paths = {}

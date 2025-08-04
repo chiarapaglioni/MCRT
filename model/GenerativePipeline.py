@@ -154,9 +154,7 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
         input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
         target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
         bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
-        # bin_weights = batch['bin_weights'][0].to(device)              # (B, bins+1)
 
-        # logger.info(f"Bin Weights: {bin_weights}")
         if batch_idx % 20 == 0:
             count_bin0_only_histograms(input_hist, title="Input")
             count_bin0_only_histograms(target_hist, title="Target")
@@ -208,7 +206,6 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
             target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
             clean_img = batch['clean'].to(device)                           # (B, C, H, W)
             bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
-            # bin_weights = batch['bin_weights'][1].to(device)              # (B, bins+1)
 
             # Forward pass
             pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
@@ -251,7 +248,7 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
 
             # DEBUG (images)
             if debug and batch_idx == 0 and epoch is not None and (epoch % plot_every_n) == 0:
-                input_rgb = decode_image_from_probs(input_hist, bin_edges)   # (B, C, H, W)
+                input_rgb = decode_image_from_probs(input_hist[:, :, :n_bins, :, :], bin_edges)
                 plot_debug_aggregation(pred_rgb_img, pred, input_rgb, clean_img, epoch, debug_dir="debug_plots_gen")
 
     avg_loss = total_loss / len(dataloader)
