@@ -611,6 +611,65 @@ def chi_square_distance(h1, h2, eps=1e-8):
     return 0.5 * torch.sum((h1 - h2)**2 / (h1 + h2 + eps), dim=-1)  # sum over bins
 
 
+def compute_guidance_map(image_tensor):
+    """
+    Compute edge map from image_tensor (C,H,W).
+    Using Sobel filter and returning normalized gradient magnitude.
+    """
+    # Convert to grayscale: simple mean over RGB
+    gray = image_tensor.mean(dim=0, keepdim=True)  # (1, H, W)
+
+    # Sobel kernels
+    sobel_x = torch.tensor([[1,0,-1],[2,0,-2],[1,0,-1]], dtype=torch.float32, device=gray.device).unsqueeze(0).unsqueeze(0)
+    sobel_y = torch.tensor([[1,2,1],[0,0,0],[-1,-2,-1]], dtype=torch.float32, device=gray.device).unsqueeze(0).unsqueeze(0)
+
+    grad_x = F.conv2d(gray.unsqueeze(0), sobel_x, padding=1)
+    grad_y = F.conv2d(gray.unsqueeze(0), sobel_y, padding=1)
+
+    grad_mag = torch.sqrt(grad_x**2 + grad_y**2).squeeze(0)  # (1, H, W) -> (H, W)
+
+    # Normalize between 0 and 1
+    grad_mag = (grad_mag - grad_mag.min()) / (grad_mag.max() - grad_mag.min() + 1e-8)
+
+    return grad_mag.unsqueeze(0)  # (1, H, W)
+
+def compute_local_histogram_affinity_chi2(hist):
+    """
+    hist: (3, H, W, B) normalized histograms (per channel)
+    Returns:
+        affinity_map: (1, H, W) map of local affinity based on min chi2 distance to neighbors
+    """
+    C, H, W, B = hist.shape
+    device = hist.device
+    
+    # Reshape histograms to (H, W, C*B) for neighborhood extraction
+    hist_hw = hist.permute(1, 2, 0, 3).reshape(H, W, C*B)
+    
+    # Pad histograms with reflection padding to handle borders
+    hist_pad = F.pad(hist_hw.permute(2, 0, 1), (1, 1, 1, 1), mode='reflect').permute(1, 2, 0)  # (H+2, W+2, C*B)
+    
+    affinity = torch.zeros(H, W, device=device)
+    
+    # Extract 3x3 neighborhoods for each pixel
+    for i in range(H):
+        for j in range(W):
+            center_hist = hist_pad[i+1, j+1]  # (C*B)
+            neighborhood = hist_pad[i:i+3, j:j+3].reshape(9, C*B)  # 9 neighbors
+            
+            # Compute chi2 distances to neighbors
+            dists = chi_square_distance(center_hist.unsqueeze(0).repeat(9, 1), neighborhood)  # (9,)
+            dists[4] = float('inf')  # ignore self-distance
+            
+            min_dist = torch.min(dists)
+            
+            # Convert distance to affinity (inverse)
+            affinity[i, j] = 1.0 / (min_dist + 1e-8)
+    
+    # Normalize affinity map to [0,1]
+    affinity_norm = (affinity - affinity.min()) / (affinity.max() - affinity.min() + 1e-8)
+    return affinity_norm.unsqueeze(0)  # (1, H, W)
+
+
 def compute_global_mean_std(root_dir):
     """
     Compute global mean and std from all 1x32spp TIFF images (MC rendered).

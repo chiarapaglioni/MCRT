@@ -7,8 +7,12 @@ import numpy as np
 import torch.nn.functional as F
 from torchvision import transforms
 from torch.utils.data import Dataset
+import os
+import torchvision.transforms.functional as TF
+import numpy as np
+import imageio
 # Utils
-from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms, compute_covariance_matrix, chi_square_distance
+from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms, compute_covariance_matrix, chi_square_distance, compute_local_histogram_affinity_chi2
 from dataset.HistogramGenerator import generate_histograms_torch, generate_hist_statistics
 
 import logging
@@ -600,6 +604,20 @@ class HistogramBinomDataset(Dataset):
 
         input_tensor = input_hist.permute(0, 3, 1, 2).contiguous().float()                  # shape (3, B, H, W)
         target_tensor = target_hist.permute(0, 3, 1, 2).contiguous().float()                # shape (3, B, H, W)
+
+        # Compute affinity map with chi2 distance
+        affinity_map = compute_local_histogram_affinity_chi2(input_tensor)  # (1, H, W)
+
+        # Optionally save affinity map as image (rescale to 0-255)
+        if self.debug:
+            os.makedirs("maps", exist_ok=True)
+            affinity_np = (affinity_map.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
+            filename = f"{scene}_affinity_{i}_{j}_{h}_{w}.png"
+            imageio.imwrite(os.path.join("maps", filename), affinity_np)
+
+        # Distance Map
+        affinity_expanded = affinity_map.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
+        input_tensor = torch.cat([input_tensor, affinity_expanded], dim=1)
 
         # MEAN and RELATIVE VARIANCE from samples
         if self.stat:
