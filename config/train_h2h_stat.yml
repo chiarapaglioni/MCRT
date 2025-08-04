@@ -7,17 +7,17 @@ dataset:
   hist_bins: 32
   mode: hist                            # Options: 'hist' for hist2hist
   data_augmentation: true               # random horizontal/vertical flips
-  virt_size: 1000                       # number of crops to generate across all the scenes
+  virt_size: 5000                       # number of crops to generate across all the scenes
   clean: true                           # whether to include 'clean' targets if available
   debug: true                           # saves plot to output save_dir for debugging
-  stat: false                           # whether to include mean and var value alongside histogram (helps with colour reconstruction)
+  stat: true                            # whether to include mean and var value alongside histogram (helps with colour reconstruction)
   target_sample: 32                     # number of samples assigned to target (out of low_spp samples)
-  log_bins: true                       # whether to use histogram with log or linear binning
+  log_bins: true                        # whether to use histogram with log or linear binning
 
 model:
   model_name: gap
   in_channels: 3                        # if using n2n model same as n_bins_input because we want to feed the whole hist to the model
-  n_bins_input: 32                      # hist_bins if only using hist, else 34 if using other stats or 39 if cov + mean
+  n_bins_input: 35                      # hist_bins if only using hist, else 34 if using other stats or 39 if cov + mean
   out_mode: dist                        # 'mean' or 'dist' to output RGB image or distrbution
   merge_mode: concat                    # 'add' or 'concat'
   depth: 5                              # number of encoder/decoder blocks
@@ -36,5 +36,5 @@ val_split: 0.1                          # 10% validation split
 
 # training
 num_epochs: 100
-plot_every: 1                          # how often to save the debug plots
+plot_every: 2                          # how often to save the debug plots
 save_dir: checkpoints

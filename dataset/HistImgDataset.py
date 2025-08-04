@@ -535,11 +535,23 @@ class HistogramBinomDataset(Dataset):
                 normalize=False
             ) 
 
+            # generate statistics and tone map them otherwise they'll be in HDR range !!!
             stats = generate_hist_statistics(spp1_samples, return_channels='all')
             pixel_mean = stats['mean']                                                      # (3, H, W)
             rel_var = stats['relative_variance']                                            # (3, H, W)
-
             cov_matrix = compute_covariance_matrix(spp1_samples)                            # (6, H, W)
+
+            # logger.info(f"Mean Min {pixel_mean.min()} - Max {pixel_mean.max()} - Mean {pixel_mean.mean()} - Var {pixel_mean.var()}")
+            # logger.info(f"Var Min {rel_var.min()} - Max {rel_var.max()} - Mean {rel_var.mean()} - Var {rel_var.var()}")
+            # logger.info(f"Cov Min {cov_matrix.min()} - Max {cov_matrix.max()} - Mean {cov_matrix.mean()} - Var {cov_matrix.var()}")
+
+            pixel_mean = apply_tonemap(pixel_mean, tonemap="log") 
+            rel_var = apply_tonemap(rel_var, tonemap="log") 
+            # cov_matrix = apply_tonemap(cov_matrix, tonemap="log")         do not apply log on cov matrix ! might be negative !
+
+            # logger.info(f"Mean Min {pixel_mean.min()} - Max {pixel_mean.max()} - Mean {pixel_mean.mean()} - Var {pixel_mean.var()}")
+            # logger.info(f"Var Min {rel_var.min()} - Max {rel_var.max()} - Mean {rel_var.mean()} - Var {rel_var.var()}")
+            # logger.info(f"Cov Min {cov_matrix.min()} - Max {cov_matrix.max()} - Mean {cov_matrix.mean()} - Var {cov_matrix.var()}")
 
             self.cached_data[key] = {
                 "hist": hist, "bin_edges": bin_edges, "mean": pixel_mean, "rel_var": rel_var, "cov_mat": cov_matrix
@@ -556,9 +568,6 @@ class HistogramBinomDataset(Dataset):
                 "clean_path": clean_path
             }
 
-            # Split spp1 samples into input and target sets
-            # assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
-
             # Proportion of samples to allocate to target
             p = self.target_sample / (self.low_spp + 1e-8)
             self.p = torch.tensor(min(p, 1.0))  # Ensure in [0, 1]
@@ -573,6 +582,10 @@ class HistogramBinomDataset(Dataset):
         hist = scene_cache['hist']
         bin_edges = scene_cache['bin_edges']
 
+        # CHI2 MATRIX
+        hist_norm = hist / (hist.sum(dim=-1, keepdim=True) + 1e-8)
+        affinity_map = compute_local_histogram_affinity_chi2(hist_norm, scene, cache_dir="maps")  # (1, H, W)
+
         # CROP
         if self.crop_size:
             _, H, W, _ = hist.shape
@@ -581,6 +594,7 @@ class HistogramBinomDataset(Dataset):
             else:
                 i, j, h, w = crop_coords
             hist = hist[:, i:i+h, j:j+w, :]                   # (3, H, W, B)
+            affinity_crop = affinity_map[:, i:i+h, j:j+w]                   # (3, H, W, B)
 
         # CLEAN
         clean_tensor = None
@@ -605,31 +619,25 @@ class HistogramBinomDataset(Dataset):
         input_tensor = input_hist.permute(0, 3, 1, 2).contiguous().float()                  # shape (3, B, H, W)
         target_tensor = target_hist.permute(0, 3, 1, 2).contiguous().float()                # shape (3, B, H, W)
 
-        # Compute affinity map with chi2 distance
-        affinity_map = compute_local_histogram_affinity_chi2(input_tensor)  # (1, H, W)
-
         # Optionally save affinity map as image (rescale to 0-255)
-        if self.debug:
-            os.makedirs("maps", exist_ok=True)
-            affinity_np = (affinity_map.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
-            filename = f"{scene}_affinity_{i}_{j}_{h}_{w}.png"
-            imageio.imwrite(os.path.join("maps", filename), affinity_np)
+        # if self.debug:
+        #     os.makedirs("maps", exist_ok=True)
+        #     affinity_np = (affinity_map.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
+        #     filename = f"{scene}_affinity.png"
+        #     imageio.imwrite(os.path.join("maps", filename), affinity_np)
 
-        # Distance Map
-        affinity_expanded = affinity_map.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
+        # CHI2 MATRIX
+        affinity_expanded = affinity_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
         input_tensor = torch.cat([input_tensor, affinity_expanded], dim=1)
 
         # MEAN and RELATIVE VARIANCE from samples
         if self.stat:
-            # pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)                     # (3, 1, H, W)
-            # rel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)                     # (3, 1, H, W)
-            # input_tensor = torch.cat([input_tensor, pixel_mean_expanded, rel_var_expanded], dim=1)      # (3, B+2, H, W)
-
             pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)             # (3, 1, H, W)
-            cov_tensor = scene_cache['cov_mat'][:, i:i+h, j:j+w]                                # (6, H, W)
-            cov_tensor = cov_tensor.unsqueeze(0).repeat(3, 1, 1, 1)                             # (3, 6, H, W)
+            pixel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)           # (3, 1, H, W)
+            # cov_tensor = scene_cache['cov_mat'][:, i:i+h, j:j+w]                                # (6, H, W)
+            # cov_tensor = cov_tensor.unsqueeze(0).repeat(3, 1, 1, 1)                             # (3, 6, H, W)
 
-            input_tensor = torch.cat([input_tensor, pixel_mean_expanded, cov_tensor], dim=1)    # (3, B+1+6, H, W)
+            input_tensor = torch.cat([input_tensor, pixel_mean_expanded, pixel_var_expanded], dim=1)    # (3, B+1+6, H, W)
 
         # DATA AUGMENTATION
         if self.data_augmentation:

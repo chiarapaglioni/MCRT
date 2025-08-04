@@ -604,6 +604,8 @@ def compute_covariance_matrix(samples: torch.Tensor) -> torch.Tensor:
     cov_rg = cov_matrix[0, 1]
     cov_rb = cov_matrix[0, 2]
     cov_gb = cov_matrix[1, 2]
+    # only get upper triangle for positive covariance
+    # WRONG --> can be negative
     return torch.stack([cov_rr, cov_gg, cov_bb, cov_rg, cov_rb, cov_gb], dim=0)  # (6, H, W)
 
 
@@ -630,44 +632,47 @@ def compute_guidance_map(image_tensor):
 
     # Normalize between 0 and 1
     grad_mag = (grad_mag - grad_mag.min()) / (grad_mag.max() - grad_mag.min() + 1e-8)
-
     return grad_mag.unsqueeze(0)  # (1, H, W)
 
-def compute_local_histogram_affinity_chi2(hist):
+
+def compute_local_histogram_affinity_chi2(hist, scene, cache_dir='maps'):
     """
     hist: (3, H, W, B) normalized histograms (per channel)
     Returns:
         affinity_map: (1, H, W) map of local affinity based on min chi2 distance to neighbors
+    If cache exists, load it. Else compute and store.
     """
     C, H, W, B = hist.shape
     device = hist.device
+
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_name = f"affinity_{scene}.pt"
+    cache_path = os.path.join(cache_dir, cache_name)
     
+    if os.path.exists(cache_path):
+        return torch.load(cache_path, map_location=device)
+
     # Reshape histograms to (H, W, C*B) for neighborhood extraction
-    hist_hw = hist.permute(1, 2, 0, 3).reshape(H, W, C*B)
-    
+    hist_hw = hist.permute(1, 2, 0, 3).reshape(H, W, C * B)
     # Pad histograms with reflection padding to handle borders
     hist_pad = F.pad(hist_hw.permute(2, 0, 1), (1, 1, 1, 1), mode='reflect').permute(1, 2, 0)  # (H+2, W+2, C*B)
-    
     affinity = torch.zeros(H, W, device=device)
     
-    # Extract 3x3 neighborhoods for each pixel
+    # Extract 3x3 neighborhoods and compute chi2-based affinity
     for i in range(H):
         for j in range(W):
             center_hist = hist_pad[i+1, j+1]  # (C*B)
             neighborhood = hist_pad[i:i+3, j:j+3].reshape(9, C*B)  # 9 neighbors
-            
-            # Compute chi2 distances to neighbors
             dists = chi_square_distance(center_hist.unsqueeze(0).repeat(9, 1), neighborhood)  # (9,)
-            dists[4] = float('inf')  # ignore self-distance
-            
-            min_dist = torch.min(dists)
-            
-            # Convert distance to affinity (inverse)
-            affinity[i, j] = 1.0 / (min_dist + 1e-8)
-    
-    # Normalize affinity map to [0,1]
+            dists[4] = float('inf')  # ignore self
+            affinity[i, j] = 1.0 / (torch.min(dists) + 1e-8)
+
+    # NORMALISE
     affinity_norm = (affinity - affinity.min()) / (affinity.max() - affinity.min() + 1e-8)
-    return affinity_norm.unsqueeze(0)  # (1, H, W)
+    affinity_norm = affinity_norm.unsqueeze(0)  # (1, H, W)
+
+    torch.save(affinity_norm, cache_path)
+    return affinity_norm
 
 
 def compute_global_mean_std(root_dir):
