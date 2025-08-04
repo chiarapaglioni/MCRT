@@ -294,6 +294,8 @@ def train_histogram_generator(config):
     elif config['loss']=='kl':
         loss_fn = KLDivergenceLoss()
 
+        logger.info(f"Using loss {config['loss'].upper()}")
+
     # OPTIMIZER & LR SCHEDULER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
