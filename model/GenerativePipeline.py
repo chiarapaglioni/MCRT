@@ -50,32 +50,41 @@ class CustomCrossEntropyLoss(nn.Module):
         else:
             return ce_loss
         
-# WEIGHTED ENTROPY LOSS FUNCTION
-class WeightedCrossEntropyLoss(nn.Module):
-    def __init__(self, reduction='mean'):
+# KL LOSS
+class KLDivergenceLoss(nn.Module):
+    def __init__(self, reduction='mean', eps=1e-8):
+        """
+        KL Divergence Loss for histogram distributions.
+
+        Args:
+            reduction (str): 'mean', 'sum', or 'none'
+            eps (float): small constant for numerical stability
+        """
         super().__init__()
         self.reduction = reduction
+        self.eps = eps
 
-    def forward(self, pred_logits, target_probs, bin_weights=None):
+    def forward(self, pred_logits, target_probs):
         """
-        pred_logits: (N, B) - raw logits
-        target_probs: (N, B) - target histogram probabilities
-        bin_weights: (N, B) or (B,) - optional weights per bin
-        """
-        log_probs = F.log_softmax(pred_logits, dim=1)  # (N, B)
+        Args:
+            pred_logits: (N, n_bins) unnormalized logits predicted by the model
+            target_probs: (N, n_bins) target distributions (normalized histograms)
 
-        if bin_weights is not None:
-            # Apply weights
-            weighted_ce = -(bin_weights * target_probs * log_probs).sum(dim=1)
-        else:
-            weighted_ce = -(target_probs * log_probs).sum(dim=1)
+        Returns:
+            Scalar or per-sample KL divergence
+        """
+        pred_probs = F.softmax(pred_logits, dim=1)                          # (N, n_bins)
+        target_probs = target_probs / (target_probs.sum(dim=1, keepdim=True) + self.eps)
+        kl = target_probs * torch.log((target_probs + self.eps) / (pred_probs + self.eps))  # (N, n_bins)
+        kl_loss = kl.sum(dim=1)  # (N,)
 
         if self.reduction == 'mean':
-            return weighted_ce.mean()
+            return kl_loss.mean()
         elif self.reduction == 'sum':
-            return weighted_ce.sum()
+            return kl_loss.sum()
         else:
-            return weighted_ce
+            return kl_loss  # shape (N,)
+
 
 
 # DATA LOADERS
@@ -280,7 +289,10 @@ def train_histogram_generator(config):
     ).to(device)
 
     # LOSS
-    loss_fn = CustomCrossEntropyLoss()
+    if config['loss']=='ce':
+        loss_fn = CustomCrossEntropyLoss()
+    elif config['loss']=='kl':
+        loss_fn = KLDivergenceLoss()
 
     # OPTIMIZER & LR SCHEDULER
     optimizer = optim.Adam(model.parameters(), lr=float(model_cfg["learning_rate"]))

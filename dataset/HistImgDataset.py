@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 from torch.utils.data import Dataset
 # Utils
-from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms
+from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms, compute_covariance_matrix, chi_square_distance
 from dataset.HistogramGenerator import generate_histograms_torch, generate_hist_statistics
 
 import logging
@@ -534,8 +534,10 @@ class HistogramBinomDataset(Dataset):
             pixel_mean = stats['mean']                                                      # (3, H, W)
             rel_var = stats['relative_variance']                                            # (3, H, W)
 
+            cov_matrix = compute_covariance_matrix(spp1_samples)                            # (6, H, W)
+
             self.cached_data[key] = {
-                "hist": hist, "bin_edges": bin_edges, "mean": pixel_mean, "rel_var": rel_var
+                "hist": hist, "bin_edges": bin_edges, "mean": pixel_mean, "rel_var": rel_var, "cov_mat": cov_matrix
             }
 
             # Load clean image for target
@@ -600,10 +602,15 @@ class HistogramBinomDataset(Dataset):
 
         # MEAN and RELATIVE VARIANCE from samples
         if self.stat:
-            pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)                              # (3, 1, H, W)
-            rel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)                              # (3, 1, H, W)
+            # pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)                     # (3, 1, H, W)
+            # rel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)                     # (3, 1, H, W)
+            # input_tensor = torch.cat([input_tensor, pixel_mean_expanded, rel_var_expanded], dim=1)      # (3, B+2, H, W)
 
-            input_tensor = torch.cat([input_tensor, pixel_mean_expanded, rel_var_expanded], dim=1)   # (3, B+2, H, W)
+            pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)             # (3, 1, H, W)
+            cov_tensor = scene_cache['cov_mat'][:, i:i+h, j:j+w]                                # (6, H, W)
+            cov_tensor = cov_tensor.unsqueeze(0).repeat(3, 1, 1, 1)                             # (3, 6, H, W)
+
+            input_tensor = torch.cat([input_tensor, pixel_mean_expanded, cov_tensor], dim=1)    # (3, B+1+6, H, W)
 
         # DATA AUGMENTATION
         if self.data_augmentation:

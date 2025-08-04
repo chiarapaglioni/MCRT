@@ -560,7 +560,6 @@ def decode_pred_logits_zero(probs, bin_edges):
     
     # Multiply probabilities with bin centers and sum over bins dimension
     pred_radiance = (probs * bin_centers).sum(dim=2)  # (B, C, H, W)
-    
     return pred_radiance
 
 
@@ -578,6 +577,38 @@ def print_histogram_at_pixel(hist_tensor, x, y, used_bins):
     for c, color in enumerate(['R', 'G', 'B']):
         vals = hist_tensor[c, :used_bins, y, x]
         print(f"{color} channel: {vals}")
+
+
+def compute_covariance_matrix(samples: torch.Tensor) -> torch.Tensor:
+    """
+    Compute per-pixel 3x3 covariance matrix from Monte Carlo RGB samples.
+
+    Args:
+        samples (Tensor): shape (S, 3, H, W) where S = # of samples
+
+    Returns:
+        cov (Tensor): shape (6, H, W), containing the upper triangle:
+                      [cov_rr, cov_gg, cov_bb, cov_rg, cov_rb, cov_gb]
+    """
+    S, C, H, W = samples.shape
+    assert C == 3, "Expected 3 color channels (RGB)"
+    mean = samples.mean(dim=0, keepdim=True)  # (1, 3, H, W)
+    centered = samples - mean                 # (S, 3, H, W)
+
+    # Compute covariance using einsum
+    cov_matrix = torch.einsum("schw,sdhw->cdhw", centered, centered) / (S - 1)  # (3, 3, H, W)
+
+    cov_rr = cov_matrix[0, 0]
+    cov_gg = cov_matrix[1, 1]
+    cov_bb = cov_matrix[2, 2]
+    cov_rg = cov_matrix[0, 1]
+    cov_rb = cov_matrix[0, 2]
+    cov_gb = cov_matrix[1, 2]
+    return torch.stack([cov_rr, cov_gg, cov_bb, cov_rg, cov_rb, cov_gb], dim=0)  # (6, H, W)
+
+
+def chi_square_distance(h1, h2, eps=1e-8):
+    return 0.5 * torch.sum((h1 - h2)**2 / (h1 + h2 + eps), dim=-1)  # sum over bins
 
 
 def compute_global_mean_std(root_dir):
