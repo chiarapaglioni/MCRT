@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, random_split
 from dataset.HistogramGenerator import generate_histograms_torch
 from dataset.HistImgDataset import AdaptiveSamplingDataset
 from utils.utils import compute_psnr
-from model.ClassicUNet import UNet
+from model.ClassicUNet import UNetImportancePredictor
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
@@ -213,7 +213,7 @@ class ImportanceTrainer:
         self.model = model.to(device)
         self.train_loader = train_dataset
         self.val_loader = val_dataset
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=float(lr))
         self.checkpoint_dir = checkpoint_dir
         os.makedirs(checkpoint_dir, exist_ok=True)
         self.save_best_only = save_best_only
@@ -296,7 +296,9 @@ def run_adaptive_sampling(config):
     train_loader = DataLoader(train_set, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
     val_loader = DataLoader(val_set, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
-    model = UNet(mode='hist')
+    logger.info(f"Running Adaptive Sampling with Mode {dataset_cfg['mode'].upper()}")
+
+    model = UNetImportancePredictor(mode=dataset_cfg['mode'], num_bins=dataset_cfg['hist_bins'])
 
     trainer = ImportanceTrainer(model, train_loader, val_loader, batch_size=config['batch_size'], lr=model_cfg['learning_rate'], loss=config['loss'])
 

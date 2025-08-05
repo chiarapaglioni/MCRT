@@ -883,10 +883,7 @@ class AdaptiveSamplingDataset(Dataset):
                 normalize=False
             )
 
-            hist_norm = hist / (hist.sum(dim=-1, keepdim=True) + 1e-8)
-            chi2_map = compute_local_histogram_affinity_chi2(hist_norm, key)
-
-            cache = {"hist": hist, "bin_edges": bin_edges, "chi2": chi2_map}
+            cache = {"hist": hist, "bin_edges": bin_edges}
 
             if self.mode == 'stat':
                 stats = generate_hist_statistics(spp1_tensor, return_channels='all')
@@ -904,26 +901,24 @@ class AdaptiveSamplingDataset(Dataset):
         cache = self.cached_data[scene]
 
         hist = cache['hist']  # (3, H, W, B)
-        chi2 = cache['chi2']  # (1, H, W)
 
         _, H, W, B = hist.shape
         i, j = random.randint(0, H - self.crop_size), random.randint(0, W - self.crop_size)
 
         # Crop everything
         hist_crop = hist[:, i:i+self.crop_size, j:j+self.crop_size, :]  # (3, crop, crop, B)
-        chi2_crop = chi2[:, i:i+self.crop_size, j:j+self.crop_size]     # (1, crop, crop)
+        # chi2_crop = chi2[:, i:i+self.crop_size, j:j+self.crop_size]     # (1, crop, crop)
 
         if self.mode == 'hist':
             hist_norm = hist_crop / (hist_crop.sum(dim=-1, keepdim=True) + 1e-8)
             hist_tensor = hist_norm.permute(0, 3, 1, 2)  # (3, B, H, W)
-            chi2_tensor = chi2_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
-            x = torch.cat([hist_tensor, chi2_tensor], dim=1)     # (3, B+1, H, W)
+            # chi2_tensor = chi2_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
+            x = torch.cat([hist_tensor], dim=1)     # (3, B+1, H, W)
 
         elif self.mode == 'stat':
             mean = cache['mean'][:, i:i+self.crop_size, j:j+self.crop_size].unsqueeze(1)  # (3, 1, H, W)
             var = cache['var'][:, i:i+self.crop_size, j:j+self.crop_size].unsqueeze(1)    # (3, 1, H, W)
-            chi2_tensor = chi2_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
-            x = torch.cat([mean, var, chi2_tensor], dim=1)       # (3, 3, H, W)
+            x = torch.cat([mean, var], dim=1)       # (3, 3, H, W)
 
         x = x.view(-1, self.crop_size, self.crop_size)  # flatten channel group -> (C, H, W)
 

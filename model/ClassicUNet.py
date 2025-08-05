@@ -66,17 +66,17 @@ class UNetImportancePredictor(nn.Module):
     def __init__(self, mode='stat', num_bins=64, bilinear=True):
         """
         Args:
-            mode: 'meanvar' or 'hist'
+            mode: 'stat' or 'hist'
             num_bins: number of histogram bins per channel (used if mode='hist')
         """
         super().__init__()
-        assert mode in ['meanvar', 'hist'], "mode must be 'meanvar' or 'hist'"
+        assert mode in ['stat', 'hist'], "mode must be 'meanvar' or 'hist'"
         self.mode = mode
         self.num_bins = num_bins
         self.bilinear = bilinear
 
         # Determine number of input channels
-        if mode == 'meanvar':
+        if mode == 'stat':
             self.in_channels = 6  # RGB mean + RGB var
         elif mode == 'hist':
             self.in_channels = 3 * num_bins  # RGB histograms

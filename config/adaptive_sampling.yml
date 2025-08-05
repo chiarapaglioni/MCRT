@@ -44,9 +44,9 @@ batch_size: 12                          # minibatch: 8, 12, or 16
 num_workers: 4                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
-loss: mse                              # 'mse' or 'l1'
+loss: mse                               # 'mse' or 'l1'
 
-val_split: 0.1                           # 10% validation split
+val_split: 0.1                          # 10% validation split
 
 # TRAINING
 num_epochs: 100
