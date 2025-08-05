@@ -1,6 +1,6 @@
 mi_variant: "cuda_ad_rgb"   # "cuda_ad_rgb" for GPU or "llvm_ad_rgb" for vectorised and "scalar_rgb" (default) for CPU
 
-low_spp: 32                 # Noisy image SPP (samples per pixel)
+low_spp: 64                 # Noisy image SPP (samples per pixel)
 high_spp: 4500              # Clean image SPP
 
 width: 512                  # Image width (only used indirectly via sensor / scene)

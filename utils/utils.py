@@ -440,15 +440,18 @@ def save_tiff(data, file_name):
 def save_loss_plot(train_losses, val_losses, save_dir, filename="loss_plot.png", title="Training and Validation Loss"):
     """
     Plots and saves training and validation loss curves.
+    Also saves the raw loss values in .npz format for future plotting.
 
     Args:
         train_losses (list or array): List of training loss values per epoch.
         val_losses (list or array): List of validation loss values per epoch.
-        save_dir (str or Path): Directory to save the plot.
+        save_dir (str or Path): Directory to save the plot and data.
         filename (str): Filename for the saved plot image.
         title (str): Title of the plot.
     """
     os.makedirs(save_dir, exist_ok=True)
+
+    # Save the plot
     plt.figure(figsize=(8, 6))
     plt.plot(range(1, len(train_losses) + 1), train_losses, label='Train Loss')
     plt.plot(range(1, len(val_losses) + 1), val_losses, label='Validation Loss')
@@ -457,24 +460,31 @@ def save_loss_plot(train_losses, val_losses, save_dir, filename="loss_plot.png",
     plt.title(title)
     plt.legend()
 
-    save_path = os.path.join(save_dir, filename)
-    plt.savefig(save_path)
+    plot_path = os.path.join(save_dir, filename)
+    plt.savefig(plot_path)
     plt.close()
-    logger.info(f"Loss plot saved to {save_path}")
+    logger.info(f"Loss plot saved to {plot_path}")
+
+    # Save raw data
+    data_path = os.path.join(save_dir, filename.replace('.png', '.npz'))
+    np.savez_compressed(data_path, train_loss=train_losses, val_loss=val_losses)
+    logger.info(f"Loss data saved to {data_path}")
 
 
 def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
     """
-    Saves the PSNR plot over epochs.
-    
+    Saves the PSNR plot over epochs and the raw values for future plotting.
+
     Args:
         psnr_values (list): List of PSNR values (floats).
-        save_dir (str): Directory to save the plot.
+        save_dir (str): Directory to save the plot and data.
         filename (str): Name of the output PNG file.
     """
     os.makedirs(save_dir, exist_ok=True)
-    path = os.path.join(save_dir, filename)
+    plot_path = os.path.join(save_dir, filename)
+    data_path = os.path.join(save_dir, filename.replace('.png', '.npz'))
 
+    # Plot
     plt.figure(figsize=(8, 6))
     plt.plot(psnr_values, marker='o', label='PSNR')
     plt.title("Validation PSNR over Epochs")
@@ -482,10 +492,53 @@ def save_psnr_plot(psnr_values, save_dir="plots", filename="psnr_plot.png"):
     plt.ylabel("PSNR (dB)")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(path)
+    plt.savefig(plot_path)
     plt.close()
+    logger.info(f"Saved PSNR plot to {plot_path}")
 
-    logger.info(f"Saved PSNR plot to {path}")
+    # Save raw data
+    np.savez_compressed(data_path, psnr=psnr_values)
+    logger.info(f"Saved PSNR data to {data_path}")
+
+
+def plot_multiple_npz_curves(directory, metric='psnr', title=None, save_path=None):
+    """
+    Loads and plots multiple .npz loss or PSNR files from a directory.
+
+    Args:
+        directory (str or Path): Directory containing .npz files.
+        metric (str): Either 'psnr' or 'loss'. Determines what to plot.
+        title (str): Optional plot title.
+        save_path (str): Optional path to save the combined plot as a PNG.
+    """
+    assert metric in ['psnr', 'loss'], "metric must be either 'psnr' or 'loss'"
+    files = [f for f in os.listdir(directory) if f.endswith('.npz')]
+
+    plt.figure(figsize=(10, 6))
+
+    for f in sorted(files):
+        file_path = os.path.join(directory, f)
+        data = np.load(file_path)
+
+        label = os.path.splitext(f)[0]
+
+        if metric == 'psnr' and 'psnr' in data:
+            plt.plot(data['psnr'], label=label)
+        elif metric == 'loss' and 'train_loss' in data and 'val_loss' in data:
+            plt.plot(data['train_loss'], linestyle='--', label=f"{label} - Train")
+            plt.plot(data['val_loss'], linestyle='-', label=f"{label} - Val")
+
+    plt.xlabel("Epoch")
+    plt.ylabel("PSNR (dB)" if metric == 'psnr' else "Loss")
+    plt.title(title or f"Multiple {metric.upper()} Curves")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Plot saved to: {save_path}")
+    plt.show()
 
 
 def save_patches(patches, path):

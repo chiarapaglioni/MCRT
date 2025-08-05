@@ -122,14 +122,14 @@ class N2Net(nn.Module):
         # if self.mode == "hist":
             # assert x_hist is not None, "Histogram input required in hist mode"
             # hist_feat = self.hist_encoder(x_hist)  # [B, D]
-        B, C, bins, H, W = x.shape
         if self.out_mode=="dist":
+            B, C, bins, H, W = x.shape
             x = x.view(B, C * bins, H, W)
 
         spatial_x = x[:, :self.spatial_in_channels, :, :]
         x = spatial_x  # no concat here
 
-        logger.info(f"Input Shape: {x.shape}")
+        # logger.info(f"Input Shape: {x.shape}")
         residual_connection = [x]
 
         # ---- ENCODER ----
@@ -175,7 +175,7 @@ class N2Net(nn.Module):
 
         if self.out_mode == 'dist':
             x = x.view(B, 3, self.hist_bins, H, W)
-        logger.info(f"Output Shape: {x.shape}")
+        # logger.info(f"Output Shape: {x.shape}")
         return x
 
     def _initialize_weights(self):

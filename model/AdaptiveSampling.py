@@ -78,6 +78,7 @@ class AdaptiveSampler:
                 importance_map = max_bin_count.float().mean(dim=-1).cpu()
 
         return importance_map.numpy(), hist, bin_edges
+    
     def get_adaptive_mask(self, importance_map):
         threshold = np.quantile(importance_map, self.quantile_threshold)
         mask = importance_map > threshold
@@ -230,7 +231,7 @@ class ImportanceTrainer:
         running_loss = 0
         for batch in self.train_loader:
             inputs = batch['input'].to(self.device)
-            targets = batch['target'].to(self.device)
+            targets = batch['target'].unsqueeze(1).to(self.device)
 
             self.optimizer.zero_grad()
             outputs = self.model(inputs)
@@ -250,7 +251,7 @@ class ImportanceTrainer:
         with torch.no_grad():
             for batch in self.val_loader:
                 inputs = batch['input'].to(self.device)
-                targets = batch['target'].to(self.device)
+                targets = batch['target'].unsqueeze(1).to(self.device)
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
                 running_loss += loss.item()

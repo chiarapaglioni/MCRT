@@ -2,7 +2,7 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: histograms                  # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 1                    # num of crops per scene to generate
+  crops_per_scene: 70                     # num of crops per scene to generate
   use_cached_crops: true
   low_spp: 64
   high_spp: 4500
@@ -32,12 +32,12 @@ num_workers: 8                           # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global                  # if 'global' print dataset mean and std
-loss: smape                              # 'mse' or 'l1' or 'rmse' or 'lhdr' or 'smape'
+loss: root_mse                           # 'mse' or 'l1' or 'rel_mse' 'root_mse' or 'lhdr' or 'smape'
 
 val_split: 0.1                           # 10% validation split
 
 # TRAINING
 num_epochs: 200
-plot_every: 10                           # how often to save the debug plots
+plot_every: 1                            # how often to save the debug plots
 save_dir: checkpoints
 input_tonemap: none                      # what tone mapping to apply in the loss

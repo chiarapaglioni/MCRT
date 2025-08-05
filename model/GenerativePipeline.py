@@ -114,6 +114,51 @@ class WassersteinLoss(nn.Module):
             return emd.sum()
         else:
             return emd  # [N]
+        
+
+class SMAPELoss(nn.Module):
+    def __init__(self, epsilon=1e-2):
+        super(SMAPELoss, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, prediction, target):
+        """
+        prediction, target: tensors of shape [batch_size, channels, height, width]
+        Expected channels = 3 (RGB)
+        """
+        numerator = torch.abs(prediction - target)
+        denominator = torch.abs(prediction) + torch.abs(target) + self.epsilon
+        
+        # Calculate per-pixel, per-channel SMAPE
+        smape_map = numerator / denominator
+        return smape_map.mean()
+
+
+
+# HYBRID LOSS
+class HybridLoss(nn.Module):
+    def __init__(self, alpha=1.0, beta=1.0, reduction='mean'):
+        super().__init__()
+        self.cross_entropy_loss = CustomCrossEntropyLoss(reduction=reduction)
+        self.l1_loss = SMAPELoss()
+        self.alpha = alpha
+        self.beta = beta
+
+    def forward(self, pred_logits, target_probs, pred_values, target_values):
+        """
+        Args:
+            pred_logits: (N, n_bins)
+            target_probs: (N, n_bins)
+            pred_values: (N, D) - regression output (e.g., color/spatial)
+            target_values: (N, D) - regression ground truth
+        
+        Returns:
+            Scalar hybrid loss value
+        """
+        ce = self.cross_entropy_loss(pred_logits, target_probs)
+        l1 = self.l1_loss(pred_values, target_values)
+        return self.alpha * ce + self.beta * l1
+
 
 # DATA LOADERS
 def get_generative_dataloaders(config, device):
@@ -191,6 +236,7 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
         input_hist = batch['input_hist'].to(device)                     # (B, C, bins, H, W), already normalized
         target_hist = batch['target_hist'].to(device)                   # (B, C, bins, H, W), already normalized
         bin_edges = batch['bin_edges'].to(device)                       # (B, bins+1)
+        clean_img = batch["clean"].to(device)                           # (B, C, H, W)
 
         if batch_idx % 20 == 0:
             count_bin0_only_histograms(input_hist, title="Input")
@@ -198,6 +244,11 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
 
         optimizer.zero_grad()
         pred_logits = model(input_hist)                                 # (B, C, n_bins, H, W)
+
+        # Only if hybrid include the following
+        pred_probs = torch.softmax(pred_logits, dim=2)
+        pred_rgb_img = decode_image_from_probs(pred_probs, bin_edges)   # (B, C, H, W)
+        target_rgb_img = decode_image_from_probs(target_hist, bin_edges)   # (B, C, H, W)
 
         # Rearrange predictions and targets for loss
         pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()   # (B, C, H, W, n_bins)
@@ -207,7 +258,7 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
         pred_logits_flat = pred_logits.view(-1, n_bins)                 # (B*C*H*W, n_bins)
         target_hist_flat = target_hist.view(-1, n_bins)                 # (B*C*H*W, n_bins)
 
-        loss = loss_fn(pred_logits_flat, target_hist_flat)
+        loss = loss_fn(pred_logits_flat, target_hist_flat, pred_rgb_img, target_rgb_img)
 
         loss.backward()
         optimizer.step()
@@ -220,7 +271,7 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
                 input_hist=input_hist.detach().cpu(),
                 predicted_logits=pred_logits.permute(0, 1, 4, 2, 3).detach().cpu(),  # (B, C, bins, H, W)
                 bin_edges=bin_edges.detach().cpu(),
-                clean_img=batch["clean"].detach().cpu() if "clean" in batch else None,
+                clean_img=clean_img.detach().cpu() if "clean" in batch else None,
                 step_info=f"epoch_{epoch}_batch_{batch_idx}",
                 save_dir="debug_plots_gen"
             )
@@ -247,17 +298,21 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
             # Forward pass
             pred_logits = model(input_hist)                                 # (B, C, bins, H, W)
 
-            # Prepare shapes for loss
-            pred_logits_flat = pred_logits.permute(0, 1, 3, 4, 2).contiguous().view(-1, n_bins)  # (N, bins)
-            target_hist_flat = target_hist.permute(0, 1, 3, 4, 2).contiguous().view(-1, n_bins)  # (N, bins)
-
-            # Compute cross entrpy loss between logits out from network and target distribution
-            loss = loss_fn(pred_logits_flat, target_hist_flat)
-            total_loss += loss.item()
-
             # Network output --> softmax --> proabilities --> RGB image
             pred_probs = torch.softmax(pred_logits, dim=2)
             pred_rgb_img = decode_image_from_probs(pred_probs, bin_edges)   # (B, C, H, W)
+            target_rgb_img = decode_image_from_probs(target_hist, bin_edges)   # (B, C, H, W)
+
+            # Rearrange predictions and targets for loss
+            pred_logits = pred_logits.permute(0, 1, 3, 4, 2).contiguous()   # (B, C, H, W, n_bins)
+            # target_hist = target_hist.permute(0, 1, 3, 4, 2).contiguous()   # (B, C, H, W, n_bins)
+
+            # Flatten to (N, n_bins) where N = B*C*H*W
+            pred_logits_flat = pred_logits.view(-1, n_bins)                 # (B*C*H*W, n_bins)
+            target_hist_flat = target_hist.view(-1, n_bins)                 # (B*C*H*W, n_bins)
+            
+            loss = loss_fn(pred_logits_flat, target_hist_flat, pred_rgb_img, target_rgb_img)
+            total_loss += loss.item()
 
             # AGGREGATOR
             guidance_feature = input_hist.view(input_hist.size(0), -1, input_hist.size(-2), input_hist.size(-1))  # (B, C*bins, H, W)
@@ -331,6 +386,8 @@ def train_histogram_generator(config):
         loss_fn = KLDivergenceLoss()
     elif config['loss']=='wass':
         loss_fn = WassersteinLoss()
+    elif config['loss']=='hybrid':
+        loss_fn = HybridLoss(alpha=1.0, beta=0.5)
 
     logger.info(f"Using loss {config['loss'].upper()}")
 

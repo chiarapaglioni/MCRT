@@ -200,4 +200,4 @@ def generate_hist_statistics(samples, return_channels='luminance'):
     else:
         relative_variance = relative_var                # (3, H, W)
 
-    return {'mean': mean, 'relative_variance': relative_variance}
+    return {'mean': mean, 'var': var, 'relative_variance': relative_variance}

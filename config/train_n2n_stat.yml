@@ -2,11 +2,11 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 150                    # num of crops per scene to generate
+  crops_per_scene: 150                   # num of crops per scene to generate
   use_cached_crops: false
-  low_spp: 32
+  low_spp: 64
   high_spp: 4500
-  hist_bins: 16
+  hist_bins: 32
   mode: stat                              # 'hist' for hist2noise or 'img' or 'stat' for noise2noise
   data_augmentation: true                 # horizontal and vertical flips
   clean: true                             # Whether to include 'clean' targets if available
@@ -14,7 +14,7 @@ dataset:
   debug: true                             # if true saves one plot per epoch in a debug plot folder
   supervised: false                       # if true supervised else self supervised
   tonemap: none                           # 'log' or 'reinhard' or 'reinhard_gamma' or 'none'
-  target_split: 16
+  target_split: 32
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
@@ -31,12 +31,12 @@ num_workers: 4                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global                  # if 'global' print dataset mean and std
-loss: smape                              # 'mse' or 'l1' or 'rmse' or 'lhdr' or 'smape'
+loss: smape                              # 'mse' or 'l1' or 'rel_mse' or 'root_mse' or 'lhdr' or 'smape'
 
 val_split: 0.1                           # 10% validation split
 
 # TRAINING
 num_epochs: 100
-plot_every: 10                           # how often to save the debug plots
+plot_every: 1                            # how often to save the debug plots
 save_dir: checkpoints
 input_tonemap: none                      # what tone mapping to apply in the loss

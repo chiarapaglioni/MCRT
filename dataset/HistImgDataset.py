@@ -9,6 +9,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset
 import os
 import torchvision.transforms.functional as TF
+from torchvision.transforms import RandomCrop
 import numpy as np
 import imageio
 # Utils
@@ -56,12 +57,10 @@ class ImageDataset(Dataset):
         self.spp1_images = {}           # (scene) -> tensor (N, 3, H, W)
         self.hist_features = {}         # (scene) -> tensor (H, W, 3, bins)
         self.noisy_images = {}          # (scene) -> tensor (3, H, W)
-        self.clean_images = {}          # (scene) -> tensor (3, H, W)
-        self.albedo_images = {}         # (scene) -> tensor (3, H, W)
-        self.normal_images = {}         # (scene) -> tensor (3, H, W)
         self.scene_paths = {}           # (scene) -> folder path
         self.scene_sample_indices = {}  # (scene) -> (list of input idx, target idx)
         self.variance_heatmaps = {}     # (scene) -> torch.Tensor (H_patch, W_patch)
+        self.scene_paths = {}
         self.patches = []
 
         if self.cached_dir and not os.path.exists(self.cached_dir):
@@ -90,108 +89,95 @@ class ImageDataset(Dataset):
 
         logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
 
-        for key, folder in scene_keys:
-            spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
-            noisy_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.low_spp}.tiff")), None)
-            clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
-            albedo_file = next((f for f in os.listdir(folder) if f.endswith("albedo.tiff")), None)
-            normal_file = next((f for f in os.listdir(folder) if f.endswith("normal.tiff")), None)
+        # Scan scenes and collect file paths only
+        for subdir in sorted(os.listdir(self.root_dir)):
+            full_subdir = os.path.join(self.root_dir, subdir)
+            if not os.path.isdir(full_subdir):
+                continue
+            for fname in os.listdir(full_subdir):
+                if fname.endswith(f"spp1x{self.low_spp}.tiff"):
+                    key = fname.split("_spp")[0]
+                    # PATHS
+                    spp1_file = next((f for f in os.listdir(full_subdir) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
+                    noisy_file = next((f for f in os.listdir(full_subdir) if f.startswith(key) and f.endswith(f"spp{self.low_spp}.tiff")), None)
+                    clean_file = next((f for f in os.listdir(full_subdir) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
+                    albedo_file = next((f for f in os.listdir(full_subdir) if f.endswith("albedo.tiff")), None)
+                    normal_file = next((f for f in os.listdir(full_subdir) if f.endswith("normal.tiff")), None)
+                    self.scene_paths[key] = {
+                        "folder": full_subdir,
+                        "spp1": os.path.join(full_subdir, spp1_file),
+                        "noisy": os.path.join(full_subdir, noisy_file),
+                        "clean": os.path.join(full_subdir, clean_file) if clean_file else None,
+                        "albedo": os.path.join(full_subdir, albedo_file) if albedo_file else None,
+                        "normal": os.path.join(full_subdir, normal_file) if normal_file else None,
+                    }
 
-            assert spp1_file and noisy_file, f"Missing files for scene: {key} in {folder}"
+                    assert spp1_file and noisy_file, f"Missing files for scene: {key} in {full_subdir}"
 
-            # Load spp1xN images
-            spp1_path = os.path.join(folder, spp1_file)
-            spp1_img = np.array(tifffile.imread(spp1_path))                                        # (N=low_spp, H, W, 3)
-            self.spp1_images[key] = torch.from_numpy(spp1_img).permute(0, 3, 1, 2).float()         # (N, 3, H, W)
+                    # Load spp1xN images
+                    spp1_path = os.path.join(full_subdir, spp1_file)
+                    spp1_img = np.array(tifffile.imread(spp1_path))                                        # (N=low_spp, H, W, 3)
+                    self.spp1_images[key] = torch.from_numpy(spp1_img).permute(0, 3, 1, 2).float()         # (N, 3, H, W)
 
-            # NOISY
-            noisy_path = os.path.join(folder, noisy_file)
-            noisy_img = np.array(tifffile.imread(noisy_path))                                      # (H, W, 3)
-            self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()          # (3, H, W)
+                    # NOISY
+                    noisy_path = os.path.join(full_subdir, noisy_file)
+                    noisy_img = np.array(tifffile.imread(noisy_path))                                      # (H, W, 3)
+                    self.noisy_images[key] = torch.from_numpy(noisy_img).permute(2, 0, 1).float()          # (3, H, W)
 
-            self.scene_paths[key] = folder
+                    # VARIANCE SAMPLING MAP
+                    heatmap_path = os.path.join(full_subdir, f"{key}_variance_heatmap.png")
+                    # use odd window size to cover whole image (TODO: make it customisable!)
+                    # the smaller the window size the more the details captured
+                    varmap = local_variance(self.noisy_images[key], window_size=15, save_path=heatmap_path, cmap='viridis')
+                    logger.info(f"Sampling Map Shape: {varmap.shape}")
+                    self.variance_heatmaps[key] = varmap
+                    
+                    # TODO: currently 1 min x 100 patches per scene --> could speed it up ?
+                    patch_cache_path = os.path.join(self.cached_dir, f"{key}_{crops_per_scene}_{self.crop_size}.pkl")
 
-            # CLEAN
-            if self.clean and clean_file:
-                clean_path = os.path.join(folder, clean_file)
-                clean_img = np.array(tifffile.imread(clean_path))                                   # (H, W, 3)
-                self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()       # (3, H, W)
+                    if self.use_cached_crops and os.path.exists(patch_cache_path):
+                        logger.info(f"Loading cached patches from {patch_cache_path}")
+                        scene_patches = load_patches(patch_cache_path)
+                    else:
+                        logger.info(f"Generating patches for scene {key}")
+                        scene_patches = []
+                        start_time = time.time()
 
-            # AOV
-            if self.aov:
-                # ALBEDO
-                albedo_path = os.path.join(folder, albedo_file)
-                albedo_img = np.array(tifffile.imread(albedo_path))                         # (H, W, 3)
-                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()       # (3, H, W)
-                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")                 # TONEMAPPING
-                self.albedo_images[key] = albedo_tensor
-                # NORMAL
-                normal_path = os.path.join(folder, normal_file)
-                normal_img = np.array(tifffile.imread(normal_path))                         # (H, W, 3)
-                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()       # (3, H, W)
-                normal_tensor = (normal_tensor + 1.0) * 0.5                                 # NORMALISATION
-                self.normal_images[key] = normal_tensor
+                        for _ in range(self.crops_per_scene):
+                            # i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
+                            i, j, h, w = RandomCrop.get_params(varmap, output_size=(self.crop_size, self.crop_size))
+                            patch_var = varmap[i:i+h, j:j+w].mean().item()
+                            scene_patches.append({
+                                "scene": key,
+                                "crop_coords": (i, j, h, w),
+                                "variance": patch_var
+                            })
+                        elapsed = time.time() - start_time
+                        logger.info(f"Finished generating {self.crops_per_scene} crops for scene '{key}' in {elapsed:.2f} seconds!")
 
-            # VARIANCE SAMPLING MAP
-            heatmap_path = os.path.join(folder, f"{key}_variance_heatmap.png")
-            # use odd window size to cover whole image (TODO: make it customisable!)
-            # the smaller the window size the more the details captured
-            varmap = local_variance(self.noisy_images[key], window_size=15, save_path=heatmap_path, cmap='viridis')
-            logger.info(f"Sampling Map Shape: {varmap.shape}")
-            self.variance_heatmaps[key] = varmap
-            
-            # TODO: currently 1 min x 100 patches per scene --> could speed it up ?
-            patch_cache_path = os.path.join(self.cached_dir, f"{key}_{crops_per_scene}_{self.crop_size}.pkl")
-
-            if self.use_cached_crops and os.path.exists(patch_cache_path):
-                logger.info(f"Loading cached patches from {patch_cache_path}")
-                scene_patches = load_patches(patch_cache_path)
-            else:
-                logger.info(f"Generating patches for scene {key}")
-                scene_patches = []
-                start_time = time.time()
-
-                for _ in range(self.crops_per_scene):
-                    i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
-                    spp1_patch = self.spp1_images[key][:, :, i:i+h, j:j+w]         
-                    noisy_patch = self.noisy_images[key][:, i:i+h, j:j+w]          
-                    clean_patch = self.clean_images[key][:, i:i+h, j:j+w] if self.clean and key in self.clean_images else None
-                    albedo_patch = self.albedo_images[key][:, i:i+h, j:j+w] if self.aov and key in self.albedo_images else None
-                    normal_patch = self.normal_images[key][:, i:i+h, j:j+w] if self.aov and key in self.normal_images else None
-
-                    scene_patches.append({
-                        "scene": key,
-                        "spp1": spp1_patch,
-                        "noisy": noisy_patch,
-                        "clean": clean_patch,
-                        "albedo": albedo_patch,
-                        "normal": normal_patch,
-                        "crop_coords": (i, j, h, w)
-                    })
-
-                elapsed = time.time() - start_time
-                logger.info(f"Finished generating {self.crops_per_scene} crops for scene '{key}' in {elapsed:.2f} seconds!")
-
-                # if self.cached_dir:
-                #     save_patches(scene_patches, patch_cache_path)
-                #     logger.info(f"Saved {len(scene_patches)} patches to {patch_cache_path}")
-
-            self.patches.extend(scene_patches)
+                    self.patches.extend(scene_patches)
 
         logger.info(f"Total patches collected: {len(self.patches)}")
 
     def __len__(self):
         return len(self.patches)
+    
+    def get_sampling_weights(self, normalize=True, min_clip=1e-6):
+        variances = np.array([p["variance"] for p in self.patches])
+        variances = np.clip(variances, min_clip, None)
+        if normalize:
+            variances = variances / variances.sum()
+        return variances
 
     # TODO: add the coord option that has been discared
     def __getitem__(self, idx):
         patch = self.patches[idx]
+        scene = patch["scene"]
+        paths = self.scene_paths[scene]
+        i, j, h, w = patch["crop_coords"]
 
-        spp1_patch = patch["spp1"]                  # Tensor (N, 3, crop_size, crop_size)
-        noisy_patch = patch["noisy"]                # Tensor (3, crop_size, crop_size)
-        clean_patch = patch.get("clean", None)      # Tensor (3, crop_size, crop_size) or None
-        albedo_patch = patch.get("albedo", None)    # Tensor (3, crop_size, crop_size) or None
-        normal_patch = patch.get("normal", None)    # Tensor (3, crop_size, crop_size) or None
+        spp1_patch = self.spp1_images[scene][:, :, i:i+h, j:j+w]         # (N, 3, h, w)
+        noisy_patch = self.noisy_images[scene][:, i:i+h, j:j+w]          # (3, h, w)
 
         # Shuffle spp1 patch indices to split input and target sets (Noise2Noise style)
         indices = list(range(spp1_patch.shape[0]))
@@ -203,44 +189,43 @@ class ImageDataset(Dataset):
         # INPUT 
         if self.mode == "stat":
             # INPUT FEATURES
-            rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='luminance')    # STACK tensor
-            # rgb_stats = generate_hist_statistics(noisy_patch)                                         # NOISY tensor
-
+            rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='hdr')    # STACK tensor
             mean_img = rgb_stats['mean']                                        # (3, H, W)
             mean_img = apply_tonemap(mean_img, tonemap="log") 
-            rel_var = rgb_stats['relative_variance'].permute(2, 0, 1).float()   # (1, H, W)
+            rel_var = rgb_stats['relative_variance']                            # (3, H, W)
             rel_var = apply_tonemap(rel_var, tonemap="log") 
-
-            # Compose input by concatenating mean + relative variance along channel dim
-            input_tensor = torch.cat([mean_img, rel_var], dim=0)                # (3, H, W) or # (4, H, W)
+            input_tensor = torch.cat([mean_img, rel_var], dim=0)                # (3, H, W) or # (6, H, W)
         else: 
-            # NOISY tensor
-            # input_tensor = noisy_patch.clone()
-            # input_tensor = apply_tonemap(input_tensor, tonemap="log")
-
             # STACK tensor: the first N input samples from spp1_img
             input_samples = spp1_patch[input_idx]                       # (N, H, W, 3)
             input_tensor = input_samples.mean(dim=0)                    # (3, H, W)
             input_tensor = apply_tonemap(input_tensor, tonemap="log")
 
+        # CLEAN
+        clean_tensor = None
+        if self.clean and paths["clean"] is not None:
+            clean_img = tifffile.imread(paths["clean"])
+            clean_tensor = torch.from_numpy(clean_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+
         # TARGET
         if self.supervised:
-            target_tensor = clean_patch   
+            target_tensor = clean_tensor   
         else:
-            # NOISY tensor
-            # target_tensor = noisy_patch                               # (3, H, W)
-            # STACK tensor: the last N input samples from spp1_img
             target_tensor = spp1_patch[target_idx].mean(dim=0)          # (3, H, W)
 
         # AOV
+        albedo_tensor, normal_tensor = None, None
         if self.aov:
-            # Concatenate along channel dimension: input + albedo + normal
-            to_concat = [input_tensor]
-            if albedo_patch is not None:
-                to_concat.append(albedo_patch)
-            if normal_patch is not None:
-                to_concat.append(normal_patch)
-            input_tensor = torch.cat(to_concat, dim=0)  # e.g. ((3 or 4) + 3 + 3 = (9 or 10), H, W)
+            if paths["albedo"]:
+                albedo_img = tifffile.imread(paths["albedo"])
+                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
+                input_tensor = torch.cat([input_tensor, albedo_tensor], dim=0)
+            if paths["normal"]:
+                normal_img = tifffile.imread(paths["normal"])
+                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+                normal_tensor = (normal_tensor + 1.0) * 0.5
+                input_tensor = torch.cat([input_tensor, normal_tensor], dim=0)
 
         # DATA AUGMENTATION: random horizontal and vertical flips (only in train mode)
         if self.data_augmentation and self.run_mode == "train":
@@ -248,28 +233,28 @@ class ImageDataset(Dataset):
                 input_tensor = torch.flip(input_tensor, dims=[-1])
                 target_tensor = torch.flip(target_tensor, dims=[-1])
                 noisy_patch = torch.flip(noisy_patch, dims=[-1])
-                if clean_patch is not None:
-                    clean_patch = torch.flip(clean_patch, dims=[-1])
-                if albedo_patch is not None:
-                    albedo_patch = torch.flip(albedo_patch, dims=[-1])
-                if normal_patch is not None:
-                    normal_patch = torch.flip(normal_patch, dims=[-1])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[-1])
+                if albedo_tensor is not None:
+                    albedo_tensor = torch.flip(albedo_tensor, dims=[-1])
+                if normal_tensor is not None:
+                    normal_tensor = torch.flip(normal_tensor, dims=[-1])
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-2])
                 target_tensor = torch.flip(target_tensor, dims=[-2])
                 noisy_patch = torch.flip(noisy_patch, dims=[-2])
-                if clean_patch is not None:
-                    clean_patch = torch.flip(clean_patch, dims=[-2])
-                if albedo_patch is not None:
-                    albedo_patch = torch.flip(albedo_patch, dims=[-2])
-                if normal_patch is not None:
-                    normal_patch = torch.flip(normal_patch, dims=[-2])
+                if clean_tensor is not None:
+                    clean_tensor = torch.flip(clean_tensor, dims=[-2])
+                if albedo_tensor is not None:
+                    albedo_tensor = torch.flip(albedo_tensor, dims=[-2])
+                if normal_tensor is not None:
+                    normal_tensor = torch.flip(normal_tensor, dims=[-2])
 
         return {
             "input": input_tensor,                                          # (3 or 9, H, W)
             "target": target_tensor,                                        # (3, H, W)
             "noisy": noisy_patch,                                           # (3, H, W)
-            "clean": clean_patch if clean_patch is not None else None,      # (3, H, W) or None
+            "clean": clean_tensor,
             "scene": patch.get("scene", None),
             "crop_coords": patch.get("crop_coords", None),
         }
@@ -388,10 +373,12 @@ class HistogramDataset(Dataset):
                 albedo_img = tifffile.imread(paths["albedo"])
                 albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
                 albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
+                input_tensor = torch.cat([input_tensor, albedo_tensor], dim=0)
             if paths["normal"]:
                 normal_img = tifffile.imread(paths["normal"])
                 normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
                 normal_tensor = (normal_tensor + 1.0) * 0.5
+                input_tensor = torch.cat([input_tensor, normal_tensor], dim=0)
 
         # HISTOGRAMS
         hist, bin_edges = load_or_compute_histograms(
@@ -420,16 +407,9 @@ class HistogramDataset(Dataset):
         rgb_stats = generate_hist_statistics(input_samples_tensor, return_channels='luminance')
         mean_img = apply_tonemap(rgb_stats["mean"], tonemap="log")
         rel_var = apply_tonemap(rgb_stats["relative_variance"], tonemap="log")
-
         input_tensor = torch.cat([input_tensor, mean_img, rel_var], dim=0)
 
-        if self.aov:
-            if albedo_tensor is not None:
-                input_tensor = torch.cat([input_tensor, albedo_tensor], dim=0)
-            if normal_tensor is not None:
-                input_tensor = torch.cat([input_tensor, normal_tensor], dim=0)
-
-        # Data augmentation as before
+        # DATA AUGMENTATION
         if self.data_augmentation and self.run_mode == "train":
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-1])
