@@ -2,7 +2,7 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 150                    # num of crops per scene to generate
+  crops_per_scene: 300                    # num of crops per scene to generate
   use_cached_crops: true
   low_spp: 64
   high_spp: 4500
@@ -26,7 +26,7 @@ model:
   learning_rate: 1e-4
 
 # DATALOADER
-batch_size: 12                          # minibatch: 8, 12, or 16
+batch_size: 16                          # minibatch: 8, 12, or 16
 num_workers: 8                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
@@ -36,7 +36,7 @@ loss: smape                              # 'mse' or 'l1' or 'rmse' or 'lhdr' or 
 val_split: 0.1                           # 10% validation split
 
 # TRAINING
-num_epochs: 2
-plot_every: 1                           # how often to save the debug plots
+num_epochs: 300
+plot_every: 5                            # how often to save the debug plots
 save_dir: checkpoints
 input_tonemap: none                      # what tone mapping to apply in the loss

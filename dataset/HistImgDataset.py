@@ -66,29 +66,6 @@ class ImageDataset(Dataset):
         if self.cached_dir and not os.path.exists(self.cached_dir):
             os.makedirs(self.cached_dir)
 
-        # Scan scenes and files
-        scene_keys = []
-        for subdir in sorted(os.listdir(self.root_dir)):
-            full_subdir = os.path.join(self.root_dir, subdir)
-            if not os.path.isdir(full_subdir):
-                continue
-            for fname in os.listdir(full_subdir):
-                if fname.endswith(f"spp1x{self.low_spp}.tiff"):
-                    key = fname.split("_spp")[0]
-                    scene_keys.append((key, full_subdir))
-
-        all_scenes = sorted(set(key for key, _ in scene_keys))
-
-        if scene_names is not None:
-            scene_names_set = set(scene_names)
-            scene_keys = [(key, folder) for key, folder in scene_keys if key in scene_names_set]
-            self.scene_names = sorted(scene_names_set.intersection(all_scenes))
-        else:
-            self.scene_names = all_scenes
-        assert self.scene_names, f"No scenes found in {self.root_dir}"
-
-        logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
-
         # Scan scenes and collect file paths only
         for subdir in sorted(os.listdir(self.root_dir)):
             full_subdir = os.path.join(self.root_dir, subdir)
@@ -132,7 +109,6 @@ class ImageDataset(Dataset):
                     logger.info(f"Sampling Map Shape: {varmap.shape}")
                     self.variance_heatmaps[key] = varmap
                     
-                    # TODO: currently 1 min x 100 patches per scene --> could speed it up ?
                     patch_cache_path = os.path.join(self.cached_dir, f"{key}_{crops_per_scene}_{self.crop_size}.pkl")
 
                     if self.use_cached_crops and os.path.exists(patch_cache_path):
@@ -143,6 +119,7 @@ class ImageDataset(Dataset):
                         scene_patches = []
                         start_time = time.time()
 
+                        # random crops because if selected based on variance it overfits!
                         for _ in range(self.crops_per_scene):
                             # i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
                             i, j, h, w = RandomCrop.get_params(varmap, output_size=(self.crop_size, self.crop_size))
