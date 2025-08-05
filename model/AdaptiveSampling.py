@@ -54,7 +54,7 @@ class AdaptiveSampler:
     def compute_histogram_and_importance(self, samples):
         hist, bin_edges = generate_histograms_torch(samples, num_bins=self.num_bins, device=self.device)
         max_bin_count = hist.max(dim=-1).values
-        importance_map = max_bin_count.mean(dim=-1)
+        importance_map = max_bin_count.float().mean(dim=-1)
         return importance_map.cpu().numpy(), hist, bin_edges
 
     def get_adaptive_mask(self, importance_map):
