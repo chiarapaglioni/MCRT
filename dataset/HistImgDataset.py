@@ -813,3 +813,125 @@ class CropHistogramBinomDataset(Dataset):
             "bin_edges": bin_edges_tensor,
             "crop_coords": (i, j, h, w) if self.crop_size else None
         }
+
+
+class AdaptiveSamplingDataset(Dataset):
+    """
+    Dataset that loads input features (histograms or stats) and the importance map target.
+    """
+    def __init__(self, root_dir: str, crop_size: int = 128, virt_size: int = 1000,
+                 hist_bins: int = 8, mode: str = 'hist', clean: bool = True,
+                 low_spp: int = 32, high_spp: int = 4500, cached_dir: str = None,
+                 debug: bool = False, device: str = 'cpu', target_sample: int = 1, 
+                 scene_names=None, log_bins: bool = True):
+
+        self.root_dir = root_dir
+        self.crop_size = crop_size
+        self.virt_size = virt_size
+        self.hist_bins = hist_bins
+        self.mode = mode
+        self.clean = clean
+        self.low_spp = low_spp
+        self.high_spp = high_spp
+        self.cached_dir = cached_dir
+        self.debug = debug
+        self.device = device
+        self.target_sample = target_sample
+        self.log_bins = log_bins
+
+        self.scene_names = scene_names or []
+        self.cached_data = {}
+
+        self._load_dataset()
+
+    def _load_dataset(self):
+        scene_keys = []
+        for subdir in sorted(os.listdir(self.root_dir)):
+            full_subdir = os.path.join(self.root_dir, subdir)
+            if not os.path.isdir(full_subdir):
+                continue
+            for fname in os.listdir(full_subdir):
+                if fname.endswith(f"spp1x{self.low_spp}.tiff"):
+                    key = fname.split(f"_spp")[0]
+                    scene_keys.append((key, full_subdir))
+
+        all_scenes = sorted(set(key for key, _ in scene_keys))
+        if not self.scene_names:
+            self.scene_names = all_scenes
+
+        for key, folder in scene_keys:
+            if key not in self.scene_names:
+                continue
+
+            spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
+            spp1_path = os.path.join(folder, spp1_file)
+            spp1 = tifffile.imread(spp1_path)  # (low_spp, H, W, 3)
+            spp1_tensor = torch.from_numpy(spp1).permute(0, 3, 1, 2).float()  # (N, 3, H, W)
+
+            spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
+            spp1_path = os.path.join(folder, spp1_file)
+            spp1 = tifffile.imread(spp1_path)  # (low_spp, H, W, 3)
+            spp1_tensor = torch.from_numpy(spp1).permute(0, 3, 1, 2).float()  # (N, 3, H, W)
+
+            hist, bin_edges = load_or_compute_histograms(
+                key=key,
+                spp1_tensor=spp1_tensor,
+                hist_bins=self.hist_bins,
+                device=self.device,
+                cached_dir=self.cached_dir,
+                log_binning=self.log_bins,
+                normalize=False
+            )
+
+            hist_norm = hist / (hist.sum(dim=-1, keepdim=True) + 1e-8)
+            chi2_map = compute_local_histogram_affinity_chi2(hist_norm, key)
+
+            cache = {"hist": hist, "bin_edges": bin_edges, "chi2": chi2_map}
+
+            if self.mode == 'stat':
+                stats = generate_hist_statistics(spp1_tensor, return_channels='all')
+                mean = apply_tonemap(stats['mean'], tonemap='log')
+                var = apply_tonemap(stats['relative_variance'], tonemap='log')
+                cache.update({'mean': mean, 'var': var})
+
+            self.cached_data[key] = cache
+
+    def __len__(self):
+        return self.virt_size
+
+    def __getitem__(self, idx):
+        scene = self.scene_names[idx % len(self.scene_names)]
+        cache = self.cached_data[scene]
+
+        hist = cache['hist']  # (3, H, W, B)
+        chi2 = cache['chi2']  # (1, H, W)
+
+        _, H, W, B = hist.shape
+        i, j = random.randint(0, H - self.crop_size), random.randint(0, W - self.crop_size)
+
+        # Crop everything
+        hist_crop = hist[:, i:i+self.crop_size, j:j+self.crop_size, :]  # (3, crop, crop, B)
+        chi2_crop = chi2[:, i:i+self.crop_size, j:j+self.crop_size]     # (1, crop, crop)
+
+        if self.mode == 'hist':
+            hist_norm = hist_crop / (hist_crop.sum(dim=-1, keepdim=True) + 1e-8)
+            hist_tensor = hist_norm.permute(0, 3, 1, 2)  # (3, B, H, W)
+            chi2_tensor = chi2_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
+            x = torch.cat([hist_tensor, chi2_tensor], dim=1)     # (3, B+1, H, W)
+
+        elif self.mode == 'stat':
+            mean = cache['mean'][:, i:i+self.crop_size, j:j+self.crop_size].unsqueeze(1)  # (3, 1, H, W)
+            var = cache['var'][:, i:i+self.crop_size, j:j+self.crop_size].unsqueeze(1)    # (3, 1, H, W)
+            chi2_tensor = chi2_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
+            x = torch.cat([mean, var, chi2_tensor], dim=1)       # (3, 3, H, W)
+
+        x = x.view(-1, self.crop_size, self.crop_size)  # flatten channel group -> (C, H, W)
+
+        # Fake target for now: uniform importance (can replace with e.g. |error| or |variance|)
+        y = torch.ones((self.crop_size, self.crop_size))  # (H, W)
+
+        return {
+            'input': x.float(),
+            'target': y.float(),
+            'scene': scene,
+        }

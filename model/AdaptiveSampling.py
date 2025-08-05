@@ -1,11 +1,16 @@
+import os
 import time
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import torch.nn.functional as F
 from renderer.SceneRenderer import SceneRenderer
+from torch.utils.data import DataLoader, random_split
 from dataset.HistogramGenerator import generate_histograms_torch
+from dataset.HistImgDataset import AdaptiveSamplingDataset
 from utils.utils import compute_psnr
+from model.ClassicUNet import UNet
+from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 import logging
 logger = logging.getLogger(__name__)
@@ -25,7 +30,8 @@ class AdaptiveSampler:
         initial_spp=1,
         extra_samples=64,
         extra_spp=4,
-        quantile_threshold=0.8
+        quantile_threshold=0.8,
+        mode='hist',
     ):
         self.renderer = SceneRenderer(scene_path, width, height, debug)
         self.num_bins = num_bins
@@ -38,6 +44,7 @@ class AdaptiveSampler:
         self.extra_samples = extra_samples
         self.extra_spp = extra_spp
         self.quantile_threshold = quantile_threshold
+        self.mode = mode
 
     def initial_render(self, seed_start=0):
         if self.debug:
@@ -51,12 +58,26 @@ class AdaptiveSampler:
         samples = torch.from_numpy(samples_np).float().to(self.device)
         return samples, duration
 
-    def compute_histogram_and_importance(self, samples):
-        hist, bin_edges = generate_histograms_torch(samples, num_bins=self.num_bins, device=self.device)
-        max_bin_count = hist.max(dim=-1).values
-        importance_map = max_bin_count.float().mean(dim=-1)
-        return importance_map.cpu().numpy(), hist, bin_edges
+    def compute_importance_map(self, samples):
+        if self.mode == 'stat':
+            # === Standard approach: Mean / Variance-based Importance ===
+            variance = torch.var(samples, dim=0).mean(dim=-1)  # (H, W)
+            importance_map = variance
+            hist = None
+            bin_edges = None
+        else:
+            # === Histogram-based Importance (optionally learned) ===
+            hist, bin_edges = generate_histograms_torch(samples, num_bins=self.num_bins, device=self.device)
+            if self.learned_model:
+                # If model provided, use it to predict importance map
+                with torch.no_grad():
+                    importance_map = self.learned_model(hist).squeeze(0).cpu()
+            else:
+                # Default: use max bin count as heuristic
+                max_bin_count = hist.max(dim=-1).values
+                importance_map = max_bin_count.float().mean(dim=-1).cpu()
 
+        return importance_map.numpy(), hist, bin_edges
     def get_adaptive_mask(self, importance_map):
         threshold = np.quantile(importance_map, self.quantile_threshold)
         mask = importance_map > threshold
@@ -87,11 +108,11 @@ class AdaptiveSampler:
 
     def adaptive_sampling_loop(self):
         old_samples, t_initial = self.initial_render(seed_start=0)
-        importance_map, hist, bin_edges = self.compute_histogram_and_importance(old_samples)
+        importance_map, hist, bin_edges = self.compute_importance_map(old_samples)
         mask = self.get_adaptive_mask(importance_map)
         new_samples, t_extra = self.render_additional_samples(seed_start=self.initial_samples)
         all_samples = self.merge_samples(old_samples, new_samples, mask=mask)
-        final_importance, _, _ = self.compute_histogram_and_importance(all_samples)
+        final_importance, _, _ = self.compute_importance_map(all_samples)
 
         if self.debug:
             print(f"Adaptive sampling completed: total samples = {all_samples.shape[0]}")
@@ -120,7 +141,8 @@ def run_adaptive_sampling(config):
         initial_spp=config["initial_spp"],
         extra_samples=config["extra_samples"],
         extra_spp=config["extra_spp"],
-        quantile_threshold=config["quantile_threshold"]
+        quantile_threshold=config["quantile_threshold"], 
+        mode=config['mode']
     )
     device = adaptive_sampler.device
     
@@ -174,3 +196,109 @@ def run_adaptive_sampling(config):
     
     plt.tight_layout()
     plt.show()
+
+
+class ImportanceTrainer:
+    def __init__(self,
+                 model,
+                 train_dataset,
+                 val_dataset=None,
+                 batch_size=8,
+                 lr=1e-3,
+                 device='cuda' if torch.cuda.is_available() else 'cpu',
+                 checkpoint_dir='./checkpoints',
+                 save_best_only=True,
+                 loss='mse'):
+        self.device = device
+        self.model = model.to(device)
+        self.train_loader = train_dataset
+        self.val_loader = val_dataset
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.checkpoint_dir = checkpoint_dir
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        self.save_best_only = save_best_only
+        self.best_val_loss = float('inf')
+        self.loss = loss
+
+        if self.loss == "mse":
+            self.criterion = torch.nn.MSELoss()
+        elif self.loss == "l1":
+            self.criterion = torch.nn.L1Loss()
+
+    def train_epoch(self):
+        self.model.train()
+        running_loss = 0
+        for batch in self.train_loader:
+            inputs = batch['input'].to(self.device)
+            targets = batch['target'].to(self.device)
+
+            self.optimizer.zero_grad()
+            outputs = self.model(inputs)
+            loss = self.criterion(outputs, targets)
+            loss.backward()
+            self.optimizer.step()
+
+            running_loss += loss.item()
+        avg_loss = running_loss / len(self.train_loader)
+        return avg_loss
+
+    def validate(self):
+        if self.val_loader is None:
+            return None
+        self.model.eval()
+        running_loss = 0
+        with torch.no_grad():
+            for batch in self.val_loader:
+                inputs = batch['input'].to(self.device)
+                targets = batch['target'].to(self.device)
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, targets)
+                running_loss += loss.item()
+        avg_loss = running_loss / len(self.val_loader)
+        return avg_loss
+
+    def save_checkpoint(self, epoch, val_loss):
+        path = os.path.join(self.checkpoint_dir, f'importance_model_epoch{epoch}_val{val_loss:.4f}.pth')
+        torch.save(self.model.state_dict(), path)
+        print(f"Saved checkpoint: {path}")
+
+    def fit(self, epochs=10):
+        for epoch in range(1, epochs + 1):
+            train_loss = self.train_epoch()
+            val_loss = self.validate()
+
+            print(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}", end='')
+            if val_loss is not None:
+                print(f" - Val Loss: {val_loss:.4f}")
+                if val_loss < self.best_val_loss:
+                    self.best_val_loss = val_loss
+                    if self.save_best_only:
+                        self.save_checkpoint(epoch, val_loss)
+            else:
+                print()
+
+def run_adaptive_sampling(config):
+    dataset_cfg = config['dataset']
+    model_cfg = config['model']
+
+    full_dataset = AdaptiveSamplingDataset(root_dir=dataset_cfg['root_dir'], mode=dataset_cfg['mode'])
+    total_len = len(full_dataset)
+    val_ratio = config.get('val_split', 0.1)
+    val_len = int(total_len * val_ratio)
+    train_len = total_len - val_len
+
+    train_set, val_set = random_split(full_dataset, [train_len, val_len])
+
+    logger.info(f"Total dataset size: {total_len}")
+    logger.info(f"Training set size:  {len(train_set)}")
+    logger.info(f"Validation set size: {len(val_set)}")
+
+    train_loader = DataLoader(train_set, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
+    val_loader = DataLoader(val_set, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+
+    model = UNet(mode='hist')
+
+    trainer = ImportanceTrainer(model, train_loader, val_loader, batch_size=config['batch_size'], lr=model_cfg['learning_rate'], loss=config['loss'])
+
+    # Train
+    trainer.fit(epochs=20)
