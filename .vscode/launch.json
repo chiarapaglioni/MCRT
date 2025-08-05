@@ -83,12 +83,20 @@
             "args": ["eval_gen", "--config", "config/eval_gen.yml"],
             "console": "integratedTerminal"
         },
-                {
+        {
             "name": "Test - Num Workers",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/launch.py",
             "args": ["test_workers", "--config", "config/test_cpu.yml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Adaptive Sampling",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["adaptive_sampling"],
             "console": "integratedTerminal"
         }
     ]

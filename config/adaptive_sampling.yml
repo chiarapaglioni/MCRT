@@ -1,0 +1,12 @@
+scene_path: data/living-room/scene.xml
+resolution:
+  width: 512
+  height: 512
+initial_samples: 16                 # number of initial 1spp images
+initial_spp: 1                      # SPP for initial render
+extra_samples: 16                   # number of extra images to sample adaptively
+extra_spp: 4                        # SPP for each extra image
+quantile_threshold: 0.8             # quantile to decide which pixels get more samples
+histogram_bins: 16                  # bins for computing histograms per pixel
+seed_start: 0                       # random seed base for reproducibility
+debug: true                         # print intermediate info
