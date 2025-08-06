@@ -461,15 +461,14 @@ def evaluate_model(config):
         )
 
 
-def plot_all_model_predictions(config, sample_idx=0, save_path="plots/model_predictions.png", cols=3):
+def plot_all_model_predictions(config, num_images=5, save_path="plots/model_predictions.png"):
     """
-    Plots predictions from multiple models in a grid format.
+    Plots predictions from multiple models for randomly selected samples.
 
     Parameters:
     - config: dict with 'entries' (list of model configs) and 'model' (model architecture)
-    - sample_idx: index of the test image in dataset
+    - num_images: number of random test images to visualize
     - save_path: where to save the final plot
-    - cols: number of columns in the grid
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     entries = config["entries"]
@@ -477,43 +476,9 @@ def plot_all_model_predictions(config, sample_idx=0, save_path="plots/model_pred
     dataset_cfg = config["dataset"]
 
     dataset = ImageDataset(**dataset_cfg, run_mode="test")
+    total_samples = len(dataset)
+    selected_indices = random.sample(range(total_samples), num_images)
 
-    # Load the test sample
-    sample = dataset.__getitem__(sample_idx)
-    noisy = sample["noisy"].unsqueeze(0).to(device)
-    input_tensor = sample["input"].unsqueeze(0).to(device)
-    clean = sample["clean"].to(device) if sample.get("clean") is not None else None
-
-    init_psnr = compute_psnr(noisy.squeeze(0), clean)
-
-    # Prepare predictions
-    predictions = []
-
-    for entry in entries:
-        model_path = entry["path"]
-        loss_type = entry["loss_type"]
-        tone_mapping = entry["tone_mapping"]
-
-        model = load_model(model_cfg, dataset_cfg, model_path, device=device)
-        model.eval()
-        with torch.no_grad():
-            pred = model(input_tensor).squeeze(0)
-
-        psnr = compute_psnr(pred, clean)
-        predictions.append({
-            "image": pred,
-            "loss_type": loss_type,
-            "tone_mapping": tone_mapping,
-            "psnr": psnr
-        })
-
-    # Include baseline images at the start
-    predictions = [
-        {"image": noisy.squeeze(0), "loss_type": "Noisy Input", "tone_mapping": "", "psnr": init_psnr},
-        {"image": clean, "loss_type": "Clean (GT)", "tone_mapping": "", "psnr": None},
-    ] + predictions
-
-    # Plot as grid
     def to_img(t, correct=False):
         if t.dim() == 4: t = t.squeeze(0)
         img = t.detach().cpu().numpy().transpose(1, 2, 0)
@@ -522,32 +487,66 @@ def plot_all_model_predictions(config, sample_idx=0, save_path="plots/model_pred
         img = img.clip(0, 1)
         return img
 
-    total = len(predictions)
-    rows = math.ceil(total / cols)
+    all_predictions = []
 
-    fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 4.5 * rows))
-    axes = axes.flatten()
+    for sample_idx in selected_indices:
+        sample = dataset.__getitem__(sample_idx)
+        noisy = sample["noisy"].unsqueeze(0).to(device)
+        input_tensor = sample["input"].unsqueeze(0).to(device)
+        clean = sample["clean"].to(device) if sample.get("clean") is not None else None
+        init_psnr = compute_psnr(noisy.squeeze(0), clean)
 
-    for i in range(len(axes)):
-        ax = axes[i]
-        if i < total:
-            pred = predictions[i]
+        predictions = [
+            {"image": noisy.squeeze(0), "loss_type": "Noisy Input", "tone_mapping": "", "psnr": init_psnr},
+            {"image": clean, "loss_type": "Clean (GT)", "tone_mapping": "", "psnr": None},
+        ]
+
+        for entry in entries:
+            model_path = entry["path"]
+            loss_type = entry["loss_type"]
+            tone_mapping = entry["tone_mapping"]
+
+            model_cfg["in_channels"] = entry.get("in_channels", model_cfg["in_channels"])
+            model = load_model(model_cfg, dataset_cfg, model_path, device=device)
+            model.eval()
+            with torch.no_grad():
+                pred = model(input_tensor).squeeze(0)
+
+            psnr = compute_psnr(pred, clean)
+            predictions.append({
+                "image": pred,
+                "loss_type": loss_type,
+                "tone_mapping": tone_mapping,
+                "psnr": psnr
+            })
+
+        all_predictions.append((sample_idx, predictions))
+
+    # Plotting: rows = images, cols = model predictions + input/GT
+    n_rows = len(all_predictions)
+    n_cols = len(all_predictions[0][1])
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    if n_rows == 1:
+        axes = [axes]
+    if n_cols == 1:
+        axes = [[ax] for ax in axes]
+
+    for row_idx, (sample_idx, preds) in enumerate(all_predictions):
+        for col_idx, pred in enumerate(preds):
+            ax = axes[row_idx][col_idx]
             img = to_img(pred["image"], correct=True)
-            loss = pred["loss_type"]
-            tone = pred["tone_mapping"]
-            psnr = pred["psnr"]
-
-            title = f"{loss}"
-            if tone: title += f" ({tone})"
-            if psnr is not None: title += f"\nPSNR: {psnr:.2f} dB"
+            title = f"{pred['loss_type']}"
+            if pred["tone_mapping"]:
+                title += f" ({pred['tone_mapping']})"
+            if pred["psnr"] is not None:
+                title += f"\nPSNR: {pred['psnr']:.2f} dB"
 
             ax.imshow(img)
-            ax.set_title(title)
-            ax.axis("off")
-        else:
+            ax.set_title(title, fontsize=10)
             ax.axis("off")
 
-    fig.suptitle(f"Model Predictions (Sample #{sample_idx})", fontsize=18)
+    fig.suptitle("Model Predictions", fontsize=18)
     plt.tight_layout()
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
