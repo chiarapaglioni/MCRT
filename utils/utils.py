@@ -55,7 +55,8 @@ def load_model(model_cfg, dataset_cfg, model_path, device='cpu'):
         model = N2Net(
             in_channels=model_cfg["in_channels"],       # total channels: histogram + spatial
             hist_bins=dataset_cfg["hist_bins"],         # how many bins per channel
-            mode="hist"
+            mode=dataset_cfg["mode"],
+            out_mode=model_cfg["out_mode"]
         ).to(device)
     
     model.load_state_dict(torch.load(model_path, map_location=device))
@@ -983,3 +984,88 @@ def plot_experiments(config, save_folder="plots", show_plots=True):
             plt.show()
         else:
             plt.close()
+
+def plot_all_model_predictions(config, sample_idx=0, save_path="plots/model_predictions.png"):
+    """
+    Plots predictions from multiple models defined in config on a single test image sample.
+
+    Parameters:
+    - config: dict with 'entries' (list of model configs) and 'model' (model architecture)
+    - dataset: ImageDataset or compatible (must return input, noisy, clean, etc.)
+    - sample_idx: index of the test image in dataset
+    - save_path: where to save the final plot
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    entries = config["entries"]
+    model_cfg = config["model"]
+    dataset_cfg = config["dataset"]
+
+    dataset = ImageDataset(**dataset_cfg, run_mode="test")
+
+    # === Load test sample ===
+    sample = dataset.__getitem__(sample_idx)
+    noisy = sample["noisy"].unsqueeze(0).to(device)       # [1, C, H, W]
+    input_tensor = sample["input"].unsqueeze(0).to(device)
+    clean = sample["clean"].to(device) if sample.get("clean") is not None else None
+
+    init_psnr = compute_psnr(noisy.squeeze(0), clean)
+
+    # === Store predictions and psnrs ===
+    predictions = []
+
+    for entry in entries:
+        model_path = entry["path"]
+        loss_type = entry["loss_type"]
+        tone_mapping = entry["tone_mapping"]
+
+        model = load_model(model_cfg, dataset_cfg, model_path, device=device)
+        model.eval()
+        with torch.no_grad():
+            pred = model(input_tensor).squeeze(0)
+
+        psnr = compute_psnr(pred, clean)
+        predictions.append({
+            "image": pred,
+            "loss_type": loss_type,
+            "tone_mapping": tone_mapping,
+            "psnr": psnr
+        })
+
+    # === Plot all predictions ===
+    def to_img(t, correct=False):
+        if t.dim() == 4: t = t.squeeze(0)
+        img = t.detach().cpu().numpy().transpose(1, 2, 0)
+        if correct:
+            img = tonemap_gamma_correct(img)
+        img = img.clip(0, 1)
+        return img
+
+    n_preds = len(predictions)
+    total_cols = 2 + n_preds  # Noisy + Clean + N models
+    fig, axes = plt.subplots(1, total_cols, figsize=(4 * total_cols, 5))
+
+    # Noisy input
+    axes[0].imshow(to_img(noisy, correct=True))
+    axes[0].set_title(f"Noisy Input\nPSNR: {init_psnr:.2f} dB")
+    axes[0].axis("off")
+
+    # Clean image
+    axes[1].imshow(to_img(clean, correct=True))
+    axes[1].set_title("Clean (GT)")
+    axes[1].axis("off")
+
+    # Each model prediction
+    for i, pred in enumerate(predictions):
+        img = to_img(pred["image"], correct=True)
+        title = f'{pred["loss_type"]} - {pred["tone_mapping"]}\nPSNR: {pred["psnr"]:.2f} dB'
+        axes[i + 2].imshow(img)
+        axes[i + 2].set_title(title)
+        axes[i + 2].axis("off")
+
+    fig.suptitle("Model Predictions", fontsize=18)
+    plt.tight_layout()
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, bbox_inches="tight")
+    print(f"Saved predictions plot to {save_path}")
+    plt.close()

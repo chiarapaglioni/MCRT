@@ -5,6 +5,10 @@ groups:
         loss_type: "MSE"
         tone_mapping: "HDR"
 
+      - path: "results/loss_test_img/hdr_l1/2025-08-06_img_loss_plot.npz"
+        loss_type: "L1"
+        tone_mapping: "HDR"
+
       - path: "results/loss_test_img/log_smape/2025-08-06_img_loss_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Log"
@@ -43,6 +47,10 @@ groups:
         loss_type: "MSE"
         tone_mapping: "HDR"
 
+      - path: "results/loss_test_img/hdr_l1/2025-08-06_img_psnr_plot.npz"
+        loss_type: "L1"
+        tone_mapping: "HDR"
+
       - path: "results/loss_test_img/log_smape/2025-08-06_img_psnr_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Log"
@@ -74,3 +82,4 @@ groups:
       # - path: "results/loss_test_img/reinhard_l1/2025-08-06_img_psnr_plot.npz"
       #   loss_type: "L1"
       #   tone_mapping: "Reinhard"
+    

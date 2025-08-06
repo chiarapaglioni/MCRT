@@ -106,6 +106,14 @@
             "program": "${workspaceFolder}/launch.py",
             "args": ["experiments"],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Experiments - Plot",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["experiments_plot"],
+            "console": "integratedTerminal"
         }
     ]
 }
