@@ -1,52 +1,76 @@
 groups:
   - title: "Image Loss Curves"
     entries:
+      - path: "results/loss_test_img/hdr_mse/2025-08-06_img_loss_plot.npz"
+        loss_type: "MSE"
+        tone_mapping: "HDR"
+
       - path: "results/loss_test_img/log_smape/2025-08-06_img_loss_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Log"
 
-      # - path: "results/loss_test_img/log_mse/2025-08-06_img_loss_plot.npz"
-      #   loss_type: "MSE"
-      #   tone_mapping: "Log"
+      - path: "results/loss_test_img/log_mse/2025-08-06_img_loss_plot.npz"
+        loss_type: "MSE"
+        tone_mapping: "Log"
 
       - path: "results/loss_test_img/log_rmse/2025-08-06_img_loss_plot.npz"
         loss_type: "RMSE"
         tone_mapping: "Log"
 
-      # - path: "results/loss_test/reinhard_smape/2025-08-06_img_loss_plot.npz"
-      #   loss_type: "SMAPE"
-      #   tone_mapping: "Reinhard"
+      - path: "results/loss_test_img/log_l1/2025-08-06_img_loss_plot.npz"
+        loss_type: "L1"
+        tone_mapping: "Log"
+
+      - path: "results/loss_test_img/reinhard_smape/2025-08-06_img_loss_plot.npz"
+        loss_type: "SMAPE"
+        tone_mapping: "Reinhard"
 
       # - path: "results/loss_test_img/reinhard_mse/2025-08-06_img_loss_plot.npz"
       #   loss_type: "MSE"
       #   tone_mapping: "Reinhard"
 
-      # - path: "results/loss_test_img/reinhard_rmse/2025-08-06_img_loss_plot.npz"
-      #   loss_type: "RMSE"
+      - path: "results/loss_test_img/reinhard_rmse/2025-08-06_img_loss_plot.npz"
+        loss_type: "RMSE"
+        tone_mapping: "Reinhard"
+
+      # - path: "results/loss_test_img/reinhard_l1/2025-08-06_img_loss_plot.npz"
+      #   loss_type: "L1"
       #   tone_mapping: "Reinhard"
 
   - title: "PSNR Curves"
     entries:
+      - path: "results/loss_test_img/hdr_mse/2025-08-06_img_psnr_plot.npz"
+        loss_type: "MSE"
+        tone_mapping: "HDR"
+
       - path: "results/loss_test_img/log_smape/2025-08-06_img_psnr_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Log"
 
-      # - path: "results/loss_test_img/log_mse/2025-08-06_img_psnr_plot.npz"
-      #   loss_type: "MSE"
-      #   tone_mapping: "Log"
+      - path: "results/loss_test_img/log_mse/2025-08-06_img_psnr_plot.npz"
+        loss_type: "MSE"
+        tone_mapping: "Log"
 
       - path: "results/loss_test_img/log_rmse/2025-08-06_img_psnr_plot.npz"
         loss_type: "RMSE"
         tone_mapping: "Log"
 
-      # - path: "results/loss_test/reinhard_smape/2025-08-06_img_psnr_plot.npz"
-      #   loss_type: "SMAPE"
-      #   tone_mapping: "Reinhard"
+      - path: "results/loss_test_img/log_l1/2025-08-06_img_psnr_plot.npz"
+        loss_type: "L1"
+        tone_mapping: "Log"
+
+      - path: "results/loss_test_img/reinhard_smape/2025-08-06_img_psnr_plot.npz"
+        loss_type: "SMAPE"
+        tone_mapping: "Reinhard"
 
       # - path: "results/loss_test_img/reinhard_mse/2025-08-06_img_psnr_plot.npz"
       #   loss_type: "MSE"
       #   tone_mapping: "Reinhard"
 
-      # - path: "results/loss_test_img/reinhard_rmse/2025-08-06_img_psnr_plot.npz"
-      #   loss_type: "RMSE"
+      - path: "results/loss_test_img/reinhard_rmse/2025-08-06_img_psnr_plot.npz"
+        loss_type: "RMSE"
+        tone_mapping: "Reinhard"
+
+      # - path: "results/loss_test_img/reinhard_l1/2025-08-06_img_psnr_plot.npz"
+      #   loss_type: "L1"
       #   tone_mapping: "Reinhard"
