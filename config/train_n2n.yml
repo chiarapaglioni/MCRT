@@ -28,7 +28,7 @@ model:
 
 # DATALOADER
 batch_size: 16                          # minibatch: 8, 12, or 16
-num_workers: 4                          # 4 on CPU or 8 on GPU
+num_workers: 10                         # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global                  # if 'global' print dataset mean and std

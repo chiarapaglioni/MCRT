@@ -245,9 +245,11 @@ class HistogramDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
                  data_augmentation: bool = True, crops_per_scene: int = 1000,
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
-                 clean: bool = False, aov: bool = False, cached_dir: str = None, debug: bool = False,
-                 device: str = None, scene_names=None, supervised: bool = False, tonemap: str = None, 
-                 target_split: int = 1, run_mode: str = None, use_cached_crops: bool = False, log_bins: bool = False):
+                 clean: bool = False, aov: bool = False, cached_dir: str = None, 
+                 debug: bool = False, device: str = None, scene_names=None, 
+                 supervised: bool = False, tonemap: str = None, target_split: int = 1, 
+                 run_mode: str = None, use_cached_crops: bool = False, log_bins: bool = False,
+                 stat: bool = False, input_tonemap: str = 'log'):
         
         self.root_dir = root_dir
         self.crop_size = crop_size
@@ -267,6 +269,8 @@ class HistogramDataset(Dataset):
         self.use_cached_crops = use_cached_crops
         self.supervised = supervised
         self.log_bins = log_bins
+        self.stat = stat
+        self.input_tonemap = input_tonemap
         if self.supervised:
             logger.info("Supervised (noise2clean) mode")
         else:
@@ -318,21 +322,47 @@ class HistogramDataset(Dataset):
                     self.noisy_images[key] = noisy_tensor
                     varmap = local_variance(noisy_tensor, window_size=15)
 
-                    for _ in range(self.crops_per_scene):
-                        i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
-                        self.patches.append({"scene": key, "coords": (i, j, h, w)})
-                    logger.info(f"Generated patches of scene {key}!")
+                    patch_cache_path = os.path.join(self.cached_dir, f"{key}_{crops_per_scene}_{self.crop_size}.pkl")
+
+                    if self.use_cached_crops and os.path.exists(patch_cache_path):
+                        logger.info(f"Loading cached patches from {patch_cache_path}")
+                        scene_patches = load_patches(patch_cache_path)
+                    else:
+                        logger.info(f"Generating patches for scene {key}")
+                        scene_patches = []
+                        start_time = time.time()
+
+                        # random crops because if selected based on variance it overfits!
+                        for _ in range(self.crops_per_scene):
+                            # i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
+                            i, j, h, w = RandomCrop.get_params(varmap, output_size=(self.crop_size, self.crop_size))
+                            patch_var = varmap[i:i+h, j:j+w].mean().item()
+                            scene_patches.append({
+                                "scene": key,
+                                "crop_coords": (i, j, h, w),
+                                "variance": patch_var
+                            })
+                        elapsed = time.time() - start_time
+                        logger.info(f"Finished generating {self.crops_per_scene} crops for scene '{key}' in {elapsed:.2f} seconds!")
+
+                    self.patches.extend(scene_patches)
 
         logger.info(f"Total patches: {len(self.patches)}")
 
     def __len__(self):
         return len(self.patches)
+    
+    def get_sampling_weights(self, normalize=True, min_clip=1e-6):
+        variances = np.array([p["variance"] for p in self.patches])
+        variances = np.clip(variances, min_clip, None)
+        if normalize:
+            variances = variances / variances.sum()
+        return variances
 
     def __getitem__(self, idx):
         patch_info = self.patches[idx]
         scene = patch_info["scene"]
-        i, j, h, w = patch_info["coords"]
-
+        i, j, h, w = patch_info["crop_coords"]
         paths = self.scene_paths[scene]
 
         # NOISY
@@ -344,20 +374,6 @@ class HistogramDataset(Dataset):
         if self.clean and paths["clean"] is not None:
             clean_img = tifffile.imread(paths["clean"])
             clean_tensor = torch.from_numpy(clean_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
-
-        # AOV
-        albedo_tensor, normal_tensor = None, None
-        if self.aov:
-            if paths["albedo"]:
-                albedo_img = tifffile.imread(paths["albedo"])
-                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
-                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
-                input_tensor = torch.cat([input_tensor, albedo_tensor], dim=0)
-            if paths["normal"]:
-                normal_img = tifffile.imread(paths["normal"])
-                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
-                normal_tensor = (normal_tensor + 1.0) * 0.5
-                input_tensor = torch.cat([input_tensor, normal_tensor], dim=0)
 
         # HISTOGRAMS
         hist, bin_edges = load_or_compute_histograms(
@@ -382,11 +398,26 @@ class HistogramDataset(Dataset):
         hist_torch = hist_tensor.permute(0, 3, 1, 2).contiguous()  # (3, bins, H, W)
         input_tensor = hist_torch.reshape(-1, h, w)
 
-        # Mean and relative variance
-        rgb_stats = generate_hist_statistics(input_samples_tensor, return_channels='luminance')
-        mean_img = apply_tonemap(rgb_stats["mean"], tonemap="log")
-        rel_var = apply_tonemap(rgb_stats["relative_variance"], tonemap="log")
-        input_tensor = torch.cat([input_tensor, mean_img, rel_var], dim=0)
+        # STAT
+        if self.stat:
+            rgb_stats = generate_hist_statistics(input_samples_tensor, return_channels='hdr')
+            mean_img = apply_tonemap(rgb_stats["mean"], tonemap=self.input_tonemap)
+            rel_var = apply_tonemap(rgb_stats["relative_variance"], tonemap=self.input_tonemap)
+            input_tensor = torch.cat([input_tensor, mean_img, rel_var], dim=0)
+
+        # AOV
+        albedo_tensor, normal_tensor = None, None
+        if self.aov:
+            if paths["albedo"]:
+                albedo_img = tifffile.imread(paths["albedo"])
+                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
+                input_tensor = torch.cat([input_tensor, albedo_tensor], dim=0)
+            if paths["normal"]:
+                normal_img = tifffile.imread(paths["normal"])
+                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+                normal_tensor = (normal_tensor + 1.0) * 0.5
+                input_tensor = torch.cat([input_tensor, normal_tensor], dim=0)
 
         # DATA AUGMENTATION
         if self.data_augmentation and self.run_mode == "train":

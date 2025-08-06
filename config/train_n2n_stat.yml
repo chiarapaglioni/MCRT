@@ -19,7 +19,7 @@ dataset:
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
-  in_channels: 10                       # 3 (img) or 9 (img + aov) or 10 (stat + aov)
+  in_channels: 12                       # 3 (img) or 9 (img + aov) or 10 (stat + aov)
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 4                              # only for GAP model
@@ -28,7 +28,7 @@ model:
 
 # DATALOADER
 batch_size: 16                          # minibatch: 8, 12, or 16
-num_workers: 4                          # 4 on CPU or 8 on GPU
+num_workers: 10                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global                  # if 'global' print dataset mean and std
