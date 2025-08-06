@@ -182,12 +182,12 @@ def train_epoch(model, dataloader, optimizer, criterion, device, tonemap, mode, 
 
         optimizer.zero_grad()
 
-        if mode == "hist":
-            x_hist = hdr_input[:, :3*n_bins]                        # (B, 48, H, W)
-            x_spatial = hdr_input[:, 3*n_bins:, :, :]               # (B, 6, H, W)
-            pred = model(x_spatial, x_hist)                         # B, 3, H, W (HDR space)
-        else:
-            pred = model(hdr_input)                                 # B, 3, H, W (HDR space)
+        # if mode == "hist":
+        #     x_hist = hdr_input[:, :3*n_bins]                        # (B, 48, H, W)
+        #     x_spatial = hdr_input[:, 3*n_bins:, :, :]               # (B, 6, H, W)
+        #     pred = model(x_spatial, x_hist)                         # B, 3, H, W (HDR space)
+        # else:
+        pred = model(hdr_input)                                 # B, 3, H, W (HDR space)
 
         # DEBUG (statistics)
         if batch_idx % 50 == 0:
@@ -236,20 +236,20 @@ def validate_epoch(model, dataloader, criterion, device, tonemap, mode, n_bins, 
             hdr_target = batch['target'].to(device)         # B, 3, H, W
             clean = batch['clean'].to(device)               # B, 3, H, W
 
-            if mode == "hist":
-                x_hist = hdr_input[:, :3*n_bins]                    # (B, 48, H, W)
-                x_spatial = hdr_input[:, 3*n_bins:, :, :]           # (B, 6, H, W)                  
+            # if mode == "hist":
+            #     x_hist = hdr_input[:, :3*n_bins]                    # (B, 48, H, W)
+            #     x_spatial = hdr_input[:, 3*n_bins:, :, :]           # (B, 6, H, W)                  
 
-                # PREDICTION
-                pre_agg_pred = model(x_spatial, x_hist)         # B, 3, H, W (HDR space)
+            #     # PREDICTION
+            #     pre_agg_pred = model(x_spatial, x_hist)         # B, 3, H, W (HDR space)
                 
-                # AGGREGATOR
-                pred = aggregator(output=pre_agg_pred, features=[(x_hist, 0.3)])                      # hist only
-                # pred_img  = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
-                # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2), (x_hist, 0.3)])  # hybrid
-            else:
-                pre_agg_pred = model(hdr_input)                             # B, 3, H, W (HDR space)
-                pred  = aggregator(output=pre_agg_pred, features=[(hdr_input, 0.2)]) 
+            #     # AGGREGATOR
+            #     pred = aggregator(output=pre_agg_pred, features=[(x_hist, 0.3)])                      # hist only
+            #     # pred_img  = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2)])                 # img only
+            #     # pred = aggregator(output=pre_agg_pred, features=[(x_spatial, 0.2), (x_hist, 0.3)])  # hybrid
+            # else:
+            pre_agg_pred = model(hdr_input)                             # B, 3, H, W (HDR space)
+            pred  = aggregator(output=pre_agg_pred, features=[(hdr_input, 0.2)]) 
 
             loss = criterion(apply_tonemap(pred, tonemap=tonemap), apply_tonemap(hdr_target, tonemap=tonemap))
             total_loss += loss.item()

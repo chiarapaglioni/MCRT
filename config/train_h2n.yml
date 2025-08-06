@@ -2,25 +2,26 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 30                    # num of crops per scene to generate
+  crops_per_scene: 200                    # num of crops per scene to generate
   use_cached_crops: false
   low_spp: 64
   high_spp: 4500
-  hist_bins: 32
+  hist_bins: 16
   mode: hist                              # 'hist' for hist2noise or 'img' or 'stat' for noise2noise
   data_augmentation: true                 # horizontal and vertical flips
   clean: true                             # Whether to include 'clean' targets if available
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
   debug: true                             # if true saves one plot per epoch in a debug plot folder
   supervised: false                       # if true supervised else self supervised
-  stat: true                              # whether to include mean and var next to histogram
+  stat: false                             # whether to include mean and var next to histogram
   tonemap: none                           # tonemap applied to the loss: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
   input_tonemap: log                      # tonemap applied to the input: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
   target_split: 32
+  log_bins: true                          # whether to use histogram with log or linear binning
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
-  in_channels: 108                      # 58 or 106 with (3*32=96)HIST + (3mean + 3var)IMG + (3albedo + 3normal)AOV
+  in_channels: 54                       # 58 or 106 with (3*32=96)HIST + (3mean + 3var)IMG + (3albedo + 3normal)AOV
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 4                              # only for GAP model
@@ -38,6 +39,6 @@ loss: smape                              # 'mse' or 'l1' or 'rel_mse' or 'root_m
 val_split: 0.1                           # 10% validation split
 
 # TRAINING
-num_epochs: 300
+num_epochs: 200
 plot_every: 5                            # how often to save the debug plots
 save_dir: checkpoints
