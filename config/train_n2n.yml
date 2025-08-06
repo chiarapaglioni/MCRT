@@ -7,7 +7,7 @@ dataset:
   low_spp: 64
   high_spp: 4500
   hist_bins: 32
-  mode: img                               # 'hist' for hist2noise or 'img' or 'stat' for noise2noise
+  mode: img                               # 'hist' for hist2noise or 'img' for noise2noise
   data_augmentation: true                 # horizontal and vertical flips
   clean: true                             # Whether to include 'clean' targets if available
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
@@ -16,6 +16,7 @@ dataset:
   tonemap: none                           # tonemap applied to the loss: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
   input_tonemap: reinhard_gamma           # tonemap applied to the input: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
   target_split: 32
+  stat: false                             # if true concatenates relative variance to the input
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'

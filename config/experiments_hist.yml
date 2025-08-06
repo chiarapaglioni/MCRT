@@ -1,0 +1,52 @@
+dataset:
+  root_dir: output
+  cached_dir: crops
+  crop_size: 128
+  crops_per_scene: 1
+  use_cached_crops: false
+  low_spp: 64
+  high_spp: 4500
+  hist_bins: 32
+  data_augmentation: false
+  clean: true
+  aov: true
+  debug: false
+  supervised: false
+  stat: false
+  input_tonemap: log
+  target_split: 32
+  mode: img
+  stat: false
+
+model:
+  model_name: n2n
+  out_mode: mean
+  in_channels: 9
+  merge_mode: concat
+  depth: 4
+  start_filters: 48
+  learning_rate: 1e-4
+
+title: "Model Predcitions"
+entries:
+  - path: "results/loss_test_img/log_smape/2025-08-06_noise2noise_mean_binsimg_ep300_smape.pth"
+    loss_type: "SMAPE"
+    tone_mapping: "Log"
+    in_channels: 9
+    stat: false
+    model_type: "img"
+
+  - path: "results/loss_test_stat/log_smape/2025-08-06_noise2noise_mean_binsimg_ep300_smape.pth"
+    loss_type: "SMAPE"
+    tone_mapping: "Log"
+    in_channels: 12
+    stat: true
+    model_type: "var"   
+
+  - path: "results/loss_test_hist/log_smape/2025-08-06_hist2noise_mean_bins16_ep200_smape.pth"
+    loss_type: "SMAPE"
+    tone_mapping: "Log"
+    in_channels: 54
+    stat: false
+    mode: "hist" 
+    model_type: "hist"  

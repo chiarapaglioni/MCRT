@@ -5,7 +5,7 @@ from utils.utils import setup_logger, plot_experiments
 
 from renderer.RenderingPipeline import generate_data
 from dataset.HistogramLoader import test_data_loader
-from model.DenoisingPipeline import train_model, evaluate_model, evaluate_model_aov, benchmark_num_workers, plot_all_model_predictions
+from model.DenoisingPipeline import train_model, evaluate_model, benchmark_num_workers, plot_all_model_predictions, plot_hist_model_predictions
 from model.GenerativePipeline import train_histogram_generator, iterative_evaluate, run_generative_accumulation_pipeline, test_histogram_generator
 from model.AdaptiveSampling import run_adaptive_sampling
 
@@ -18,7 +18,7 @@ def load_config(path):
 def main():
     # PARSE CONFIG
     parser = argparse.ArgumentParser(description="MCRT Pipeline Launcher")
-    parser.add_argument("task", type=str, choices=["data_gen", "data_loader", "train", "eval", "train_gen", "eval_gen", "test_workers", "adaptive_sampling", "experiments", "experiments_plot"], help="Task to run.")
+    parser.add_argument("task", type=str, choices=["data_gen", "data_loader", "train", "eval", "train_gen", "eval_gen", "test_workers", "adaptive_sampling", "experiments", "experiments_plot", "experiments_hist"], help="Task to run.")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     args = parser.parse_args()
 
@@ -69,6 +69,9 @@ def main():
 
     elif task == "experiments_plot":
         plot_all_model_predictions(config)
+
+    elif task == "experiments_hist":
+        plot_hist_model_predictions(config)
 
 if __name__ == "__main__":
     main()

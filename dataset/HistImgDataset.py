@@ -28,7 +28,8 @@ class ImageDataset(Dataset):
                  clean: bool = False, aov: bool = False, cached_dir: str = None, 
                  debug: bool = False, device: str = None, supervised: bool = False, 
                  tonemap: str = None, target_split: int = 1, run_mode: str = None, 
-                 use_cached_crops: bool = False, input_tonemap: str = 'log'):
+                 use_cached_crops: bool = False, input_tonemap: str = 'log',
+                 stat: bool = True):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -45,6 +46,7 @@ class ImageDataset(Dataset):
         self.target_split = target_split
         self.run_mode = run_mode
         self.input_tonemap = input_tonemap
+        self.stat = stat
 
         self.use_cached_crops = use_cached_crops
         self.crops_per_scene = crops_per_scene
@@ -147,12 +149,14 @@ class ImageDataset(Dataset):
             variances = variances / variances.sum()
         return variances
 
-    # TODO: add the coord option that has been discared
-    def __getitem__(self, idx):
+    def __getitem__(self, idx, coords=None):
         patch = self.patches[idx]
         scene = patch["scene"]
         paths = self.scene_paths[scene]
-        i, j, h, w = patch["crop_coords"]
+        if coords==None:
+            i, j, h, w = patch["crop_coords"]
+        else: 
+            i, j, h, w = coords
 
         spp1_patch = self.spp1_images[scene][:, :, i:i+h, j:j+w]         # (N, 3, h, w)
         noisy_patch = self.noisy_images[scene][:, i:i+h, j:j+w]          # (3, h, w)
@@ -165,7 +169,7 @@ class ImageDataset(Dataset):
         target_idx = indices[half:]
 
         # INPUT 
-        if self.mode == "stat":
+        if self.stat:
             # INPUT FEATURES
             rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='hdr')      # STACK tensor
             mean_img = rgb_stats['mean']                                                            # (3, H, W)
@@ -359,11 +363,14 @@ class HistogramDataset(Dataset):
             variances = variances / variances.sum()
         return variances
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx, coords=None):
         patch_info = self.patches[idx]
         scene = patch_info["scene"]
-        i, j, h, w = patch_info["crop_coords"]
         paths = self.scene_paths[scene]
+        if coords==None:
+            i, j, h, w = patch_info["crop_coords"]
+        else: 
+            i, j, h, w = coords
 
         # NOISY
         spp1_img = self.spp1_images[scene]                          # (N, H, W, 3)

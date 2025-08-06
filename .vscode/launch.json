@@ -114,6 +114,14 @@
             "program": "${workspaceFolder}/launch.py",
             "args": ["experiments_plot"],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Experiments - Hist",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["experiments_hist"],
+            "console": "integratedTerminal"
         }
     ]
 }

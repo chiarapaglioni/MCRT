@@ -6,6 +6,7 @@ from torch.utils.data import WeightedRandomSampler
 from torch.utils.data import DataLoader, random_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, WeightedRandomSampler, Subset
+from torchvision.transforms import RandomCrop
 # Path
 import os
 import random
@@ -88,7 +89,7 @@ def get_data_loaders(config, run_mode="train"):
     gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
-    if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
+    if dataset_cfg['mode']=='img':
         full_dataset = ImageDataset(**dataset_cfg, run_mode=run_mode)
     elif dataset_cfg['mode']=='hist':
         full_dataset = HistogramDataset(**dataset_cfg, run_mode=run_mode)
@@ -407,10 +408,8 @@ def evaluate_model(config):
     dataset_cfg = config["dataset"]
     model_cfg = config['model']
 
-    # TODO: implement smart selection of the datsets
     hist_dataset = HistogramDataset(**{**dataset_cfg, "mode": "hist"}, run_mode="test")
     img_dataset = ImageDataset(**{**dataset_cfg, "mode": "img"}, run_mode="test")
-    # img_dataset = ImageDataset(**{**dataset_cfg, "mode": "stat"}, run_mode="test")
 
     # Randomly select n indices
     total_samples = len(img_dataset)
@@ -420,7 +419,6 @@ def evaluate_model(config):
     # Load models
     hist_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="hist", device=device)
     img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
-    # img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="stat", device=device)
 
     for idx in selected_indices:
         logger.info(f"\nEvaluating index: {idx}")
@@ -555,72 +553,123 @@ def plot_all_model_predictions(config, num_images=5, save_path="plots/model_pred
     plt.close()
 
 
-def evaluate_model_aov(config):
+def plot_hist_model_predictions(config, num_images=5, save_path="plots/model_predictions_hist.png"):
     """
-    Evaluates model using img denoising with and without AOVs
+    Plots predictions from multiple models for randomly selected samples.
+    
+    Parameters:
+    - config: dict containing 'dataset', 'model', and 'entries'
+    - num_images: number of random test images to visualize
+    - save_path: path to save the final plot
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Evaluating on device: {device}")
+    base_dataset_cfg = config["dataset"]
+    base_model_cfg = config["model"]
+    entries = config["entries"]
 
-    # Number of random samples to evaluate
-    n_samples = config["eval"].get("n_eval_samples", 5)
+    # Prepare dataset using base config for sample selection
+    dataset = ImageDataset(**base_dataset_cfg, run_mode="test")
+    total_samples = len(dataset)
+    selected_indices = random.sample(range(total_samples), num_images)
 
-    dataset_cfg = config["dataset"]
-    model_cfg = config['model']
+    def to_img(t, correct=False):
+        if t.dim() == 4: t = t.squeeze(0)
+        img = t.detach().cpu().numpy().transpose(1, 2, 0)
+        if correct:
+            img = tonemap_gamma_correct(img)
+        img = img.clip(0, 1)
+        return img
 
-    aov_dataset = ImageDataset(**{**dataset_cfg, "aov": True}, run_mode="test")
-    img_dataset = ImageDataset(**{**dataset_cfg, "aov": False}, run_mode="test")
+    all_predictions = []
 
-    # Randomly select n indices
-    total_samples = len(img_dataset)
-    selected_indices = random.sample(range(total_samples), n_samples)
-    logger.info(f"Randomly selected indices: {selected_indices}")
+    for sample_idx in selected_indices:
+        i, j, h, w = RandomCrop.get_params(dataset[sample_idx]['input'], output_size=(base_dataset_cfg["crop_size"], base_dataset_cfg["crop_size"]))
+        coords = (i, j, h, w)
 
-    # Load models
-    model_cfg["in_channels"] = 9
-    aov_model = load_model(model_cfg, config["eval"]["hist_checkpoint"], mode="img", device=device)
-    model_cfg["in_channels"] = 3
-    img_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="img", device=device)
-    # model_cfg["in_channels"] = 10
-    # stat_model = load_model(model_cfg, config["eval"]["img_checkpoint"], mode="stat", device=device)
+        # Use the base dataset to get the reference coords
+        sample = dataset.__getitem__(sample_idx, coords)
+        noisy = sample["noisy"].unsqueeze(0).to(device)
+        input_tensor = sample["input"].unsqueeze(0).to(device)
+        clean = sample["clean"].to(device) if sample.get("clean") is not None else None
+        init_psnr = compute_psnr(noisy.squeeze(0), clean)
 
-    for idx in selected_indices:
-        logger.info(f"\nEvaluating index: {idx}")
+        predictions = [
+            {"image": noisy.squeeze(0), "loss_type": "Noisy Input", "tone_mapping": "", "model_type": "", "psnr": init_psnr},
+            {"image": clean, "loss_type": "Clean (GT)", "tone_mapping": "", "model_type": "", "psnr": None},
+        ]
 
-        # Get samples
-        aov_sample = aov_dataset.__getitem__(idx)
-        crop_coords = aov_sample["crop_coords"]
-        img_sample = img_dataset.__getitem__(idx) # crop_coords=crop_coords)
+        for entry in entries:
+            entry_mode = entry.get("mode", base_dataset_cfg["mode"])
 
-        # Prepare inputs
-        aov_input = aov_sample["input"].unsqueeze(0).to(device)
-        img_input = img_sample["input"].unsqueeze(0).to(device)
-        target = aov_sample["target"].to(device)
-        noisy = aov_sample["noisy"].to(device)
-        clean = aov_sample.get("clean", None)
-        if clean is not None:
-            clean = clean.to(device)
-        scene = aov_sample["scene"]
+            # Adjust dataset and model config for the current entry
+            entry_dataset_cfg = base_dataset_cfg.copy()
+            entry_dataset_cfg["mode"] = entry_mode
+            entry_dataset_cfg["stat"] = entry.get("stat", base_dataset_cfg["stat"])
 
-        # Evaluate models
-        aov_pred, aov_psnr = evaluate_sample(aov_model, aov_input, clean)
-        img_pred, img_psnr = evaluate_sample(img_model, img_input, clean)
-        init_psnr = compute_psnr(noisy, clean)
+            entry_model_cfg = base_model_cfg.copy()
+            entry_model_cfg["in_channels"] = entry.get("in_channels", base_model_cfg["in_channels"])
 
-        logger.info(f"Scene: {scene}")
-        logger.info(f"Noisy Input PSNR:  {init_psnr:.2f} dB")
-        logger.info(f"AOV PSNR:  {aov_psnr:.2f} dB")
-        logger.info(f"No AOV PSNR: {img_psnr:.2f} dB")
+            # Load the right dataset type
+            if entry_mode == 'img':
+                temp_dataset = ImageDataset(**entry_dataset_cfg, run_mode="test")
+            else:
+                temp_dataset = HistogramDataset(**entry_dataset_cfg, run_mode="test")
 
-        # PLOT
-        plot_images(
-            noisy, init_psnr, 
-            aov_pred, aov_psnr, 
-            img_pred, img_psnr,
-            target, clean,
-            save_path=f'plots/denoised_{idx}.png',
-            correct=True        # whether to plot tonemapped + gamma corrected images
-        )
+            # Use same coords to extract corresponding input
+            temp_sample = temp_dataset.__getitem__(sample_idx, coords)
+            input_tensor = temp_sample["input"].unsqueeze(0).to(device)
+            clean = temp_sample["clean"].to(device) if temp_sample.get("clean") is not None else None
+
+            logger.info(f"Input Tensor Shape: {input_tensor.shape}")
+
+            model = load_model(entry_model_cfg, entry_dataset_cfg, entry["path"], device=device)
+            model.eval()
+            with torch.no_grad():
+                pred = model(input_tensor).squeeze(0)
+
+            psnr = compute_psnr(pred, clean)
+            predictions.append({
+                "image": pred,
+                "loss_type": entry["loss_type"],
+                "tone_mapping": entry["tone_mapping"],
+                "model_type": entry["model_type"],
+                "psnr": psnr
+            })
+
+        all_predictions.append((sample_idx, predictions))
+
+    # Plotting
+    n_rows = len(all_predictions)
+    n_cols = len(all_predictions[0][1])
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    if n_rows == 1:
+        axes = [axes]
+    if n_cols == 1:
+        axes = [[ax] for ax in axes]
+
+    for row_idx, (sample_idx, preds) in enumerate(all_predictions):
+        for col_idx, pred in enumerate(preds):
+            ax = axes[row_idx][col_idx]
+            img = to_img(pred["image"], correct=True)
+            title = f"{pred['loss_type']}"
+            if pred["tone_mapping"]:
+                title += f" ({pred['tone_mapping']})"
+            if pred["model_type"]:
+                title += f" ({pred['model_type']})"
+            if pred["psnr"] is not None:
+                title += f"\nPSNR: {pred['psnr']:.2f} dB"
+
+            ax.imshow(img)
+            ax.set_title(title, fontsize=10)
+            ax.axis("off")
+
+    fig.suptitle("Model Predictions", fontsize=18)
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, bbox_inches="tight")
+    print(f"Saved predictions plot to {save_path}")
+    plt.close()
 
 
 def benchmark_num_workers(config, batch_size=32, max_workers=8):
@@ -633,7 +682,7 @@ def benchmark_num_workers(config, batch_size=32, max_workers=8):
     gloab_mean, glob_std = compute_global_mean_std(dataset_cfg['root_dir'])
     logger.info(f"DATASET mean {[round(v.item(), 4) for v in gloab_mean.view(-1)]} - std {[round(v.item(), 4) for v in glob_std.view(-1)]}")
 
-    if dataset_cfg['mode']=='img' or dataset_cfg['mode']=='stat':
+    if dataset_cfg['mode']=='img':
         full_dataset = ImageDataset(**dataset_cfg, run_mode="test")
     elif dataset_cfg['mode']=='hist':
         full_dataset = HistogramDataset(**dataset_cfg, global_mean=gloab_mean, global_std=glob_std, run_mode="test")
