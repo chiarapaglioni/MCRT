@@ -1,9 +1,9 @@
 dataset:
   root_dir: output                        # Raw dataset location
-  cached_dir: histograms                  # Cached histograms are saved
+  cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 70                     # num of crops per scene to generate
-  use_cached_crops: true
+  crops_per_scene: 30                    # num of crops per scene to generate
+  use_cached_crops: false
   low_spp: 64
   high_spp: 4500
   hist_bins: 32
@@ -13,13 +13,14 @@ dataset:
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
   debug: true                             # if true saves one plot per epoch in a debug plot folder
   supervised: false                       # if true supervised else self supervised
-  tonemap: none                           # 'log' or 'reinhard' or 'reinhard_gamma' or 'none'
+  stat: true                              # whether to include mean and var next to histogram
+  tonemap: none                           # tonemap applied to the loss: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
+  input_tonemap: log                      # tonemap applied to the input: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
   target_split: 32
-  log_bins: false                       # whether to use histogram with log or linear binning
 
 model:
   model_name: n2n                       # 'gap' or 'n2n'
-  in_channels: 106                      # 58 or 106 with (3*32=96)HIST + (3mean + 1var)IMG + (3albedo + 3normal)AOV
+  in_channels: 108                      # 58 or 106 with (3*32=96)HIST + (3mean + 3var)IMG + (3albedo + 3normal)AOV
   out_mode: mean                        # 'mean' or 'dist'
   merge_mode: concat                    # 'add' or 'concat'
   depth: 4                              # only for GAP model
@@ -27,17 +28,16 @@ model:
   learning_rate: 1e-4
 
 # DATALOADER
-batch_size: 12                           # minibatch: 8, 12, or 16
-num_workers: 8                           # 4 on CPU or 8 on GPU
+batch_size: 16                          # minibatch: 8, 12, or 16
+num_workers: 10                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global                  # if 'global' print dataset mean and std
-loss: root_mse                           # 'mse' or 'l1' or 'rel_mse' 'root_mse' or 'lhdr' or 'smape'
+loss: smape                              # 'mse' or 'l1' or 'rel_mse' or 'root_mse' or 'lhdr' or 'smape'
 
 val_split: 0.1                           # 10% validation split
 
 # TRAINING
-num_epochs: 200
-plot_every: 1                            # how often to save the debug plots
+num_epochs: 300
+plot_every: 5                            # how often to save the debug plots
 save_dir: checkpoints
-input_tonemap: none                      # what tone mapping to apply in the loss
