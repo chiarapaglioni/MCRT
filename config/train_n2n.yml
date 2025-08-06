@@ -13,7 +13,8 @@ dataset:
   aov: true                               # Whether to include 'aov' channels to input image (note: model in_channels is 9 if aov is true)
   debug: true                             # if true saves one plot per epoch in a debug plot folder
   supervised: false                       # if true supervised else self supervised
-  tonemap: none                           # 'log' or 'reinhard' or 'reinhard_gamma' or 'none'
+  tonemap: none                           # tonemap applied to the loss: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
+  input_tonemap: none                     # tonemap applied to the input: 'log' or 'reinhard' or 'reinhard_gamma' or 'none' 
   target_split: 32
 
 model:
@@ -39,4 +40,3 @@ val_split: 0.1                           # 10% validation split
 num_epochs: 300
 plot_every: 5                            # how often to save the debug plots
 save_dir: checkpoints
-input_tonemap: none                      # what tone mapping to apply in the loss

@@ -26,9 +26,9 @@ class ImageDataset(Dataset):
                  data_augmentation: bool = True, crops_per_scene: int = 1000,
                  low_spp: int = 32, high_spp: int = 4500, hist_bins: int = 8,
                  clean: bool = False, aov: bool = False, cached_dir: str = None, 
-                 debug: bool = False, device: str = None, scene_names=None, 
-                 supervised: bool = False, tonemap: str = None, target_split: int = 1, 
-                 run_mode: str = None, use_cached_crops = False):
+                 debug: bool = False, device: str = None, supervised: bool = False, 
+                 tonemap: str = None, target_split: int = 1, run_mode: str = None, 
+                 use_cached_crops: bool = False, input_tonemap: str = 'log'):
         self.root_dir = root_dir
         self.mode = mode
         self.crop_size = crop_size
@@ -44,6 +44,7 @@ class ImageDataset(Dataset):
         self.tonemap = tonemap
         self.target_split = target_split
         self.run_mode = run_mode
+        self.input_tonemap = input_tonemap
 
         self.use_cached_crops = use_cached_crops
         self.crops_per_scene = crops_per_scene
@@ -168,15 +169,15 @@ class ImageDataset(Dataset):
             # INPUT FEATURES
             rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='hdr')    # STACK tensor
             mean_img = rgb_stats['mean']                                        # (3, H, W)
-            mean_img = apply_tonemap(mean_img, tonemap="log") 
+            mean_img = apply_tonemap(mean_img, tonemap=self.input_tonemap) 
             rel_var = rgb_stats['relative_variance']                            # (3, H, W)
-            rel_var = apply_tonemap(rel_var, tonemap="log") 
+            rel_var = apply_tonemap(rel_var, tonemap=self.input_tonemap) 
             input_tensor = torch.cat([mean_img, rel_var], dim=0)                # (3, H, W) or # (6, H, W)
         else: 
             # STACK tensor: the first N input samples from spp1_img
             input_samples = spp1_patch[input_idx]                       # (N, H, W, 3)
             input_tensor = input_samples.mean(dim=0)                    # (3, H, W)
-            input_tensor = apply_tonemap(input_tensor, tonemap="log")
+            input_tensor = apply_tonemap(input_tensor, tonemap=self.input_tonemap)
 
         # CLEAN
         clean_tensor = None
@@ -196,7 +197,7 @@ class ImageDataset(Dataset):
             if paths["albedo"]:
                 albedo_img = tifffile.imread(paths["albedo"])
                 albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
-                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="log")
+                albedo_tensor = apply_tonemap(albedo_tensor, tonemap=self.input_tonemap)
                 input_tensor = torch.cat([input_tensor, albedo_tensor], dim=0)
             if paths["normal"]:
                 normal_img = tifffile.imread(paths["normal"])
