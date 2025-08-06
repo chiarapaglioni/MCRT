@@ -328,7 +328,8 @@ def train_model(config):
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
 
     # LOSS FUNCTIONS 
-    logger.info(f"Using Tonemap: {dataset_cfg['tonemap'].upper()}")
+    logger.info(f"Input Tonemap: {dataset_cfg['input_tonemap'].upper()}")
+    logger.info(f"Loss Tonemap: {dataset_cfg['tonemap'].upper()}")
     logger.info(f"Using Loss: {config['loss'].upper()}")
     if config['loss']=='mse':
         criterion = nn.MSELoss()            # when input is same as output

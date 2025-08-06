@@ -167,16 +167,17 @@ class ImageDataset(Dataset):
         # INPUT 
         if self.mode == "stat":
             # INPUT FEATURES
-            rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='hdr')    # STACK tensor
-            mean_img = rgb_stats['mean']                                        # (3, H, W)
+            rgb_stats = generate_hist_statistics(spp1_patch[input_idx], return_channels='hdr')      # STACK tensor
+            mean_img = rgb_stats['mean']                                                            # (3, H, W)
             mean_img = apply_tonemap(mean_img, tonemap=self.input_tonemap) 
-            rel_var = rgb_stats['relative_variance']                            # (3, H, W)
+            rel_var = rgb_stats['relative_variance'] 
+            # rel_var = rgb_stats['var']                                                            # (3, H, W)
             rel_var = apply_tonemap(rel_var, tonemap=self.input_tonemap) 
-            input_tensor = torch.cat([mean_img, rel_var], dim=0)                # (3, H, W) or # (6, H, W)
+            input_tensor = torch.cat([mean_img, rel_var], dim=0)                                    # (3, H, W) or # (6, H, W)
         else: 
             # STACK tensor: the first N input samples from spp1_img
-            input_samples = spp1_patch[input_idx]                       # (N, H, W, 3)
-            input_tensor = input_samples.mean(dim=0)                    # (3, H, W)
+            input_samples = spp1_patch[input_idx]                                                   # (N, H, W, 3)
+            input_tensor = input_samples.mean(dim=0)                                                # (3, H, W)
             input_tensor = apply_tonemap(input_tensor, tonemap=self.input_tonemap)
 
         # CLEAN
