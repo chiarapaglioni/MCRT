@@ -98,6 +98,14 @@
             "program": "${workspaceFolder}/launch.py",
             "args": ["adaptive_sampling"],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Experiments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/launch.py",
+            "args": ["experiments"],
+            "console": "integratedTerminal"
         }
     ]
 }

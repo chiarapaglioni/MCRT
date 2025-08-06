@@ -1,7 +1,7 @@
 import yaml
 import argparse
 from pathlib import Path
-from utils.utils import setup_logger
+from utils.utils import setup_logger, plot_experiments
 
 from renderer.RenderingPipeline import generate_data
 from dataset.HistogramLoader import test_data_loader
@@ -18,7 +18,7 @@ def load_config(path):
 def main():
     # PARSE CONFIG
     parser = argparse.ArgumentParser(description="MCRT Pipeline Launcher")
-    parser.add_argument("task", type=str, choices=["data_gen", "data_loader", "train", "eval", "train_gen", "eval_gen", "test_workers", "adaptive_sampling"], help="Task to run.")
+    parser.add_argument("task", type=str, choices=["data_gen", "data_loader", "train", "eval", "train_gen", "eval_gen", "test_workers", "adaptive_sampling", "experiments"], help="Task to run.")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     args = parser.parse_args()
 
@@ -63,6 +63,9 @@ def main():
     # ADAPTIVE SAMPLING
     elif task == "adaptive_sampling":
         run_adaptive_sampling(config)
+
+    elif task == "experiments":
+        plot_experiments(config)
 
 if __name__ == "__main__":
     main()

@@ -936,3 +936,50 @@ def sample_crop_coords_from_variance(varmap, crop_size):
     j = idx % out_W
 
     return int(i), int(j), crop_H, crop_W
+
+
+def plot_experiments(config, save_folder="plots", show_plots=True):
+    """Plot and save groups of loss curves from config dictionary."""
+    os.makedirs(save_folder, exist_ok=True)
+
+    for group in config.get("groups", []):
+        title = group.get("title", "Loss Curves")
+        entries = group.get("entries", [])
+
+        plt.figure(figsize=(12, 6))
+
+        for entry in entries:
+            path = entry['path']
+            loss_type = entry['loss_type']
+            tone_mapping = entry['tone_mapping']
+            label = f"{loss_type} - {tone_mapping}"
+
+            try:
+                data = np.load(path)
+                keys = list(data.keys())
+                if not keys:
+                    print(f"[WARN] No data in {path}")
+                    continue
+                array = data[keys[0]]  # Assumes first key is the relevant array
+                plt.plot(array, label=label)
+
+            except Exception as e:
+                print(f"[ERROR] Could not load {path}: {e}")
+
+        plt.title(title)
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss / Metric")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+
+        # Save the plot
+        filename = title.replace(' ', '_').lower() + ".png"
+        save_path = os.path.join(save_folder, filename)
+        plt.savefig(save_path)
+        print(f"[INFO] Saved plot to {save_path}")
+
+        if show_plots:
+            plt.show()
+        else:
+            plt.close()
