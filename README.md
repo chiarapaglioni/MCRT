@@ -39,6 +39,15 @@ conda env create -f mcrt.yml
 conda activate mcrt
 ```
 
+## Modes
+**Noise2Noise**: 
+- stat: False --> standard noise2noise denoising pipeline. Takes as input the _mean_ of N samples and the corresponding AOVs.
+- stat: True --> same approach as above but it concatenates the _relative variance_ to the mean. 
+
+**Hist2Noise**: 
+- stat: False --> input consists of histogram with B bins of N samples and the corresponding AOVs.
+- stat: True --> same approach as above but it concatenates the _mean_ and _relative variance_ to the histogram. 
+
 ## How to Run
 From project root: 
 ```bash

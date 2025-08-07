@@ -1,85 +1,118 @@
 groups:
-  - title: "Image Loss Curves"
+  - title: "Tonemapping Loss Curves"
     entries:
       - path: "results/loss_test_img/hdr_mse/2025-08-06_img_loss_plot.npz"
         loss_type: "MSE"
         tone_mapping: "HDR"
+        colour: orange
 
       - path: "results/loss_test_img/hdr_l1/2025-08-06_img_loss_plot.npz"
         loss_type: "L1"
         tone_mapping: "HDR"
+        colour: blue
 
       - path: "results/loss_test_img/log_smape/2025-08-06_img_loss_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Log"
+        colour: green
 
       - path: "results/loss_test_img/log_mse/2025-08-06_img_loss_plot.npz"
         loss_type: "MSE"
         tone_mapping: "Log"
+        colour: magenta
 
       - path: "results/loss_test_img/log_rmse/2025-08-06_img_loss_plot.npz"
         loss_type: "RMSE"
         tone_mapping: "Log"
+        colour: brown
 
       - path: "results/loss_test_img/log_l1/2025-08-06_img_loss_plot.npz"
         loss_type: "L1"
         tone_mapping: "Log"
+        colour: red
 
       - path: "results/loss_test_img/reinhard_smape/2025-08-06_img_loss_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Reinhard"
-
-      # - path: "results/loss_test_img/reinhard_mse/2025-08-06_img_loss_plot.npz"
-      #   loss_type: "MSE"
-      #   tone_mapping: "Reinhard"
+        colour: purple
 
       - path: "results/loss_test_img/reinhard_rmse/2025-08-06_img_loss_plot.npz"
         loss_type: "RMSE"
         tone_mapping: "Reinhard"
+        colour: gray
 
-      # - path: "results/loss_test_img/reinhard_l1/2025-08-06_img_loss_plot.npz"
-      #   loss_type: "L1"
-      #   tone_mapping: "Reinhard"
-
-  - title: "PSNR Curves"
+  - title: "Tonemapping PSNR Curves"
     entries:
       - path: "results/loss_test_img/hdr_mse/2025-08-06_img_psnr_plot.npz"
         loss_type: "MSE"
         tone_mapping: "HDR"
+        colour: orange
 
       - path: "results/loss_test_img/hdr_l1/2025-08-06_img_psnr_plot.npz"
         loss_type: "L1"
         tone_mapping: "HDR"
+        colour: blue
 
       - path: "results/loss_test_img/log_smape/2025-08-06_img_psnr_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Log"
+        colour: green
 
       - path: "results/loss_test_img/log_mse/2025-08-06_img_psnr_plot.npz"
         loss_type: "MSE"
         tone_mapping: "Log"
+        colour: magenta
 
       - path: "results/loss_test_img/log_rmse/2025-08-06_img_psnr_plot.npz"
         loss_type: "RMSE"
         tone_mapping: "Log"
+        colour: brown
 
       - path: "results/loss_test_img/log_l1/2025-08-06_img_psnr_plot.npz"
         loss_type: "L1"
         tone_mapping: "Log"
+        colour: red
 
       - path: "results/loss_test_img/reinhard_smape/2025-08-06_img_psnr_plot.npz"
         loss_type: "SMAPE"
         tone_mapping: "Reinhard"
-
-      # - path: "results/loss_test_img/reinhard_mse/2025-08-06_img_psnr_plot.npz"
-      #   loss_type: "MSE"
-      #   tone_mapping: "Reinhard"
+        colour: purple
 
       - path: "results/loss_test_img/reinhard_rmse/2025-08-06_img_psnr_plot.npz"
         loss_type: "RMSE"
         tone_mapping: "Reinhard"
+        colour: gray
 
-      # - path: "results/loss_test_img/reinhard_l1/2025-08-06_img_psnr_plot.npz"
-      #   loss_type: "L1"
-      #   tone_mapping: "Reinhard"
-    
+  - title: "Hist Loss Curves"
+    entries:
+      - path: "results/loss_test_img/log_smape/2025-08-06_img_loss_plot.npz"
+        loss_type: "SMAPE"
+        tone_mapping: "Log"
+        colour: green
+
+      - path: "results/loss_test_stat/log_smape/2025-08-06_stat_loss_plot.npz"
+        loss_type: "SMAPE"
+        tone_mapping: "Log"
+        colour: red
+
+      # DELETED hist plot because it overfits to target so out of scale
+      # - path: "results/loss_test_hist/log_smape/2025-08-06_stat_loss_plot.npz"
+      #   loss_type: "SMAPE"
+      #   tone_mapping: "Log"
+
+  - title: "Hist PSNR Curves"
+    entries:
+      - path: "results/loss_test_img/log_smape/2025-08-06_img_psnr_plot.npz"
+        loss_type: "SMAPE"
+        tone_mapping: "Log"
+        colour: green
+
+      - path: "results/loss_test_stat/log_smape/2025-08-06_stat_psnr_plot.npz"
+        loss_type: "SMAPE"
+        tone_mapping: "Log"
+        colour: red
+
+      # DELETED hist plot because it overfits to target so out of scale
+      # - path: "results/loss_test_hist/log_smape/2025-08-06_stat_loss_plot.npz"
+      #   loss_type: "SMAPE"
+      #   tone_mapping: "Log"

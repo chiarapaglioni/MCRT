@@ -459,6 +459,16 @@ def evaluate_model(config):
         )
 
 
+# HELPER FUNCTION FOR THE FOLLOWING TWO PLOTTING FUNCTIONS!
+def to_img(t, correct=False):
+    if t.dim() == 4: t = t.squeeze(0)
+    img = t.detach().cpu().numpy().transpose(1, 2, 0)
+    if correct:
+        img = tonemap_gamma_correct(img)
+    img = img.clip(0, 1)
+    return img
+
+
 def plot_all_model_predictions(config, num_images=5, save_path="plots/model_predictions.png"):
     """
     Plots predictions from multiple models for randomly selected samples.
@@ -476,15 +486,6 @@ def plot_all_model_predictions(config, num_images=5, save_path="plots/model_pred
     dataset = ImageDataset(**dataset_cfg, run_mode="test")
     total_samples = len(dataset)
     selected_indices = random.sample(range(total_samples), num_images)
-
-    def to_img(t, correct=False):
-        if t.dim() == 4: t = t.squeeze(0)
-        img = t.detach().cpu().numpy().transpose(1, 2, 0)
-        if correct:
-            img = tonemap_gamma_correct(img)
-        img = img.clip(0, 1)
-        return img
-
     all_predictions = []
 
     for sample_idx in selected_indices:
@@ -498,7 +499,6 @@ def plot_all_model_predictions(config, num_images=5, save_path="plots/model_pred
             {"image": noisy.squeeze(0), "loss_type": "Noisy Input", "tone_mapping": "", "psnr": init_psnr},
             {"image": clean, "loss_type": "Clean (GT)", "tone_mapping": "", "psnr": None},
         ]
-
         for entry in entries:
             model_path = entry["path"]
             loss_type = entry["loss_type"]
@@ -571,15 +571,6 @@ def plot_hist_model_predictions(config, num_images=5, save_path="plots/model_pre
     dataset = ImageDataset(**base_dataset_cfg, run_mode="test")
     total_samples = len(dataset)
     selected_indices = random.sample(range(total_samples), num_images)
-
-    def to_img(t, correct=False):
-        if t.dim() == 4: t = t.squeeze(0)
-        img = t.detach().cpu().numpy().transpose(1, 2, 0)
-        if correct:
-            img = tonemap_gamma_correct(img)
-        img = img.clip(0, 1)
-        return img
-
     all_predictions = []
 
     for sample_idx in selected_indices:
@@ -589,7 +580,6 @@ def plot_hist_model_predictions(config, num_images=5, save_path="plots/model_pre
         # Use the base dataset to get the reference coords
         sample = dataset.__getitem__(sample_idx, coords)
         noisy = sample["noisy"].unsqueeze(0).to(device)
-        input_tensor = sample["input"].unsqueeze(0).to(device)
         clean = sample["clean"].to(device) if sample.get("clean") is not None else None
         init_psnr = compute_psnr(noisy.squeeze(0), clean)
 
@@ -600,7 +590,6 @@ def plot_hist_model_predictions(config, num_images=5, save_path="plots/model_pre
 
         for entry in entries:
             entry_mode = entry.get("mode", base_dataset_cfg["mode"])
-
             # Adjust dataset and model config for the current entry
             entry_dataset_cfg = base_dataset_cfg.copy()
             entry_dataset_cfg["mode"] = entry_mode
@@ -639,13 +628,17 @@ def plot_hist_model_predictions(config, num_images=5, save_path="plots/model_pre
         all_predictions.append((sample_idx, predictions))
 
     # Plotting
-    n_rows = len(all_predictions)
-    n_cols = len(all_predictions[0][1])
+    n_cols = len(all_predictions[0][1])  # number of prediction types
+    n_rows = len(all_predictions)        # number of samples
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
-    if n_rows == 1:
+
+    # Handle axes shape for single row/column cases
+    if n_rows == 1 and n_cols == 1:
+        axes = [[axes]]
+    elif n_rows == 1:
         axes = [axes]
-    if n_cols == 1:
+    elif n_cols == 1:
         axes = [[ax] for ax in axes]
 
     for row_idx, (sample_idx, preds) in enumerate(all_predictions):
