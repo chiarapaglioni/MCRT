@@ -190,3 +190,7 @@ cython_debug/
 *.ply
 *.npz
 *.tiff
+*.pth
+*.pt
+
+.DS_Store
