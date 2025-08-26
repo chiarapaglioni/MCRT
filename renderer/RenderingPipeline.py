@@ -3,18 +3,12 @@ import zipfile
 import tempfile
 import numpy as np
 from pathlib import Path
-
 # Mitsuba Renderer
 import mitsuba as mi
-
 # Image Processing and Visialisation
 import matplotlib.pyplot as plt
-
-# PSNR
-from skimage.metrics import peak_signal_noise_ratio
-
 # Custom
-from utils.utils import save_tiff
+from utils.utils import save_tiff, compute_psnr
 from renderer.SceneRenderer import SceneRenderer
 
 
@@ -97,10 +91,7 @@ def calculate_psnr_rgb(low_img_tensor, high_img_tensor):
     # Automatically determine max intensity from high quality reference
     low_img = mi.TensorXf(low_img_tensor).numpy()
     high_img = mi.TensorXf(high_img_tensor).numpy()
-
-    data_range = np.max(high_img)
-
-    psnr = peak_signal_noise_ratio(high_img, low_img, data_range=data_range)
+    psnr = compute_psnr(high_img, low_img)
     print(f"PSNR: {psnr} !!!")
 
 def render_scene(renderer, scene_path, output_dir, mi_variant, low_spp, high_spp):
@@ -189,5 +180,5 @@ def generate_data(config):
             # RENDERER
             renderer = SceneRenderer(xml_file, debug=config["debug"])
 
-            # render_scene(renderer, xml_file, output_dir, mi_variant=config["mi_variant"], low_spp=config['low_spp'], high_spp=config['high_spp'])
+            render_scene(renderer, xml_file, output_dir, mi_variant=config["mi_variant"], low_spp=config['low_spp'], high_spp=config['high_spp'])
             render_albedo_and_normal(renderer, xml_file, output_dir)

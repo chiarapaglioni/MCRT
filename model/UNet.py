@@ -102,20 +102,12 @@ class UpConv(nn.Module):
 
 class GapUNet(nn.Module):
     def __init__(self, in_channels=3, n_bins_input=16, n_bins_output=16, out_mode='mean',
-                 merge_mode='concat', depth=4, start_filters=64, mode='hist'):
-        """
-        Args:
-            in_channels: number of input color channels (usually 3)
-            n_bins: number of histogram bins (only relevant if mode='hist')
-            out_mode: 'mean' or 'dist'
-            merge_mode: 'add' (residual) or 'concat'
-            depth: number of downsampling layers
-            start_filters: number of filters in first conv block
-            mode: 'hist' or 'img' input type
-        """
-        super(GapUNet, self).__init__()
-        assert merge_mode in ('add', 'concat'), "merge_mode must be 'add' or 'concat'"
-        assert mode in ('hist', 'img'), "mode must be 'hist' or 'img'"
+                 merge_mode='concat', depth=4, start_filters=64, mode='hist',
+                 grouped_rgb_head=True):
+        super().__init__()
+        assert merge_mode in ('add', 'concat')
+        assert mode in ('hist', 'img')
+        assert out_mode in ('mean', 'dist')
 
         self.out_mode = out_mode
         self.n_bins_input = n_bins_input
@@ -124,19 +116,10 @@ class GapUNet(nn.Module):
         self.depth = depth
         self.start_filters = start_filters
         self.mode = mode
+        self.grouped_rgb_head = grouped_rgb_head
 
-        # INPUT CHANNELS
-        if self.mode == 'hist':
-            self.input_channels = in_channels * self.n_bins_input
-        else:  # 'img' mode
-            self.input_channels = in_channels
-
-        logger.info(f"Input Channels: {self.n_bins_input}")
-        logger.info(f"Output Channels: {self.n_bins_output}")
-
-        # ENCODER
-        in_ch = self.input_channels
-
+        # ---- Encoder ----
+        in_ch = in_channels
         self.down_convs = nn.ModuleList()
         for i in range(depth):
             out_ch = start_filters * (2 ** i)
@@ -144,57 +127,67 @@ class GapUNet(nn.Module):
             self.down_convs.append(DownConv(in_ch, out_ch, pooling=pooling))
             in_ch = out_ch
 
-        # DECODER
+        # ---- Decoder ----
         self.up_convs = nn.ModuleList()
         for i in reversed(range(depth - 1)):
             in_ch = start_filters * (2 ** (i + 1))
             out_ch = start_filters * (2 ** i)
             self.up_convs.append(UpConv(in_ch, out_ch, merge_mode=merge_mode))
 
-        # FINAL CONV
+        # ---- Heads ----
+        # Features leaving the decoder have 'start_filters' channels
+        feat_ch = start_filters
+
         if out_mode == 'mean':
-            self.final = nn.Conv2d(start_filters, 3, kernel_size=1)
-        elif out_mode == 'dist':
-            self.final = nn.Conv2d(start_filters, 3 * self.n_bins_output, kernel_size=1)
-        else:
-            raise ValueError("Invalid out_mode. Use 'mean' or 'dist'.")
+            self.head = nn.Conv2d(feat_ch, 3, kernel_size=1, bias=True)
+
+        else:  # 'dist' => want logits of shape (B, 3, n_bins_output, H, W)
+            out_ch = 3 * n_bins_output
+
+            if grouped_rgb_head:
+                # Option A (strictly per-channel heads):
+                # Make sure feature channels are divisible by 3 for groups=3.
+                # If not, expand to 3*feat_ch first so each RGB gets its own copy.
+                if feat_ch % 3 != 0:
+                    # replicate features into three color groups
+                    self.color_expand = nn.Conv2d(feat_ch, 3 * feat_ch, kernel_size=1, bias=True)
+                    feat_ch_for_head = 3 * feat_ch
+                else:
+                    self.color_expand = None
+                    feat_ch_for_head = feat_ch
+
+                # Each color group sees its own slice of features and outputs n_bins each
+                self.head = nn.Conv2d(feat_ch_for_head, out_ch, kernel_size=1, groups=3, bias=True)
+
+            else:
+                # Option B (shared features across RGB; a bit simpler and often works well):
+                self.color_expand = None
+                self.head = nn.Conv2d(feat_ch, out_ch, kernel_size=1, bias=True)
 
     def forward(self, x):
-        """
-        Forward pass.
-        Input shape depends on mode:
-          - hist: x is (B, 3, bins, H, W)
-          - img: x is (B, 3, H, W)
-        Output:
-          - mean image (B, 3, H, W) or distribution (B, 3, n_bins, H, W)
-        """
-        if self.mode == 'hist':
-            B, C, bins, H, W = x.shape
-            x = x.view(B, C * bins, H, W)
-
-        else:  # 'img' mode
-            # input is already (B, 3, H, W)
-            pass
-
-        logger.info(f"Input Shape: {x.shape}")
-
-        encoder_outs = []
-
-        # Encoder
+        # ---- Encoder ----
+        skips = []
         for down in self.down_convs:
             x, before_pool = down(x)
-            encoder_outs.append(before_pool)
+            skips.append(before_pool)
 
-        # Decoder
+        # ---- Decoder ----
         for i, up in enumerate(self.up_convs):
-            skip = encoder_outs[-(i + 2)]
+            skip = skips[-(i + 2)]
             x = up(skip, x)
 
-        out = self.final(x)
+        feats = x  # last decoder features, shape: (B, start_filters, H, W)
 
-        if self.out_mode == 'dist':
-            B, _, H, W = out.shape
-            out = out.view(B, 3, self.n_bins_output, H, W)
+        # ---- Head ----
+        if self.out_mode == 'mean':
+            out = self.head(feats)  # (B, 3, H, W)
+            return out
 
-        logger.info(f"Output Shape: {out.shape}")
-        return out
+        # 'dist'
+        if hasattr(self, 'color_expand') and self.color_expand is not None:
+            feats = self.color_expand(feats)  # -> (B, 3*start_filters, H, W)
+
+        logits = self.head(feats)             # (B, 3*n_bins, H, W)
+        B, _, H, W = logits.shape
+        logits = logits.view(B, 3, self.n_bins_output, H, W)
+        return logits

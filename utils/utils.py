@@ -3,18 +3,19 @@ import time
 import math
 import torch
 import pickle
+import random
 import logging
 import tifffile
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
+from collections import OrderedDict
 # Models
 from model.UNet import GapUNet
 from model.N2NUnet import N2Net
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from dataset.HistogramGenerator import generate_histograms_torch
-
 # Logger
 import logging
 logger = logging.getLogger(__name__)
@@ -63,6 +64,52 @@ def load_model(model_cfg, dataset_cfg, model_path, device='cpu'):
     model.eval()
     return model
 
+def safe_load_model(model_cfg, dataset_cfg, model_path, device="cpu"):
+    # GAP
+    if model_cfg['model_name']=='gap':
+        model = GapUNet(
+            in_channels=model_cfg["in_channels"],
+            n_bins_input=model_cfg["n_bins_input"],
+            n_bins_output=dataset_cfg['hist_bins'],
+            out_mode=model_cfg["out_mode"],
+            merge_mode=model_cfg["merge_mode"],
+            depth=model_cfg["depth"],
+            start_filters=model_cfg["start_filters"],
+            mode=dataset_cfg["mode"]
+        ).to(device)
+
+    # Noise2Noise
+    elif model_cfg['model_name']=='n2n':
+        model = N2Net(
+            in_channels=model_cfg["in_channels"],       # total channels: histogram + spatial
+            hist_bins=dataset_cfg["hist_bins"],         # how many bins per channel
+            mode=dataset_cfg["mode"],
+            out_mode=model_cfg["out_mode"]
+        ).to(device)
+
+    ckpt = torch.load(model_path, map_location=device)
+    state = ckpt.get("state_dict", ckpt)
+
+    model_sd = model.state_dict()
+    new_state = OrderedDict()
+
+    for k, v in state.items():
+        nk = k
+
+        if nk.startswith("final."):
+            nk = nk.replace("final.", "head.")
+
+        if nk in model_sd and model_sd[nk].shape == v.shape:
+            new_state[nk] = v
+        else:
+            print(f"skip {k} -> {nk}: not found or shape mismatch {v.shape} vs {model_sd.get(nk, torch.empty(0)).shape}")
+            pass
+
+    missing, unexpected = model.load_state_dict(new_state, strict=False)
+    print("=> missing:", missing)       # layers randomly initialized (e.g., color_expand.*, head.* if no match)
+    print("=> unexpected:", unexpected) # leftover keys that didn't map (e.g., old final.*)
+    return model
+
 
 def compute_psnr(pred, target):
     '''
@@ -102,7 +149,7 @@ def tonemap_gamma_correct(hdr_image, gamma=2.2):
     return display_img
 
 
-def load_or_compute_histograms(key: str, spp1_tensor: torch.Tensor, hist_bins: int, device: str = "cpu", cached_dir: str = None, log_binning: bool = True, normalize: bool = True):
+def load_or_compute_histograms(key: str, spp1_tensor: torch.Tensor, hist_bins: int, device: str = "cpu", cached_dir: str = None, log_binning: bool = True, normalize: bool = True, fixed_edges=None):
     """
     Load or compute histograms for a given scene.
 
@@ -125,7 +172,7 @@ def load_or_compute_histograms(key: str, spp1_tensor: torch.Tensor, hist_bins: i
         cache_path = os.path.join(
             cached_dir, f"{key}_histogram_{hist_bins}bins{'_log' if log_binning else ''}.pt"
         )
-
+    
     if cache_path and os.path.exists(cache_path):
         cached_data = torch.load(cache_path, map_location="cpu")
         hist = cached_data["hist_features"]
@@ -134,9 +181,9 @@ def load_or_compute_histograms(key: str, spp1_tensor: torch.Tensor, hist_bins: i
     else:
         # Compute histograms
         hist, bin_edges = generate_histograms_torch(
-            spp1_tensor, hist_bins, device, log_binning=log_binning
+            spp1_tensor, hist_bins, device, log_binning=log_binning, fixed_edges=fixed_edges
         )
-        if cache_path:
+        if cache_path:  
             torch.save({"hist_features": hist, "bin_edges": bin_edges}, cache_path)
             # logger.info(f"[Cache] Saved histograms for '{key}' to '{cache_path}'")
 
@@ -568,27 +615,135 @@ def load_patches(path):
         return pickle.load(f)
 
 
-def decode_image_from_probs(probs, bin_edges):
+def decode_image_from_probs(
+    probs: torch.Tensor,
+    bin_edges: torch.Tensor,
+    log_bins: bool = True,
+    eps: float = 1e-12,
+    zero_first_bin: bool = True,
+) -> torch.Tensor:
     """
-    Convert predicted bin probabilities to expected radiance, per batch.
+    Decode per-pixel histogram probabilities to expected radiance.
 
     Args:
-        probs: (B, C, bins, H, W), softmax output from logits
-        bin_edges: (B, bins + 1), array of bin edges per batch
+        probs: (B, C, bins, H, W) probabilities over bins
+        bin_edges: (B, C, bins+1) or (C, bins+1) or (bins+1,)
+        log_bins: True -> use log-uniform expectation, False -> arithmetic centers
+        eps: numerical stability
+        zero_first_bin: if True, force center of the first bin to 0
 
     Returns:
-        predicted_radiance: (B, C, H, W)
+        (B, C, H, W) expected radiance
     """
-    # Compute bin centers per batch: shape (B, bins)
-    bin_centers = 0.5 * (bin_edges[:, :-1] + bin_edges[:, 1:])  # (B, bins)
-    
-    # Reshape to broadcast over C, H, W dimensions (B, 1, bins, 1, 1)
-    bin_centers = bin_centers.view(probs.shape[0], 1, -1, 1, 1)
-    
-    # Multiply probabilities with bin centers and sum over bins dimension
-    pred_radiance = (probs * bin_centers).sum(dim=2)  # (B, C, H, W)
-    return pred_radiance
-    
+    B, C, bins, H, W = probs.shape
+
+    # Ensure bin_edges has shape (B, C, bins+1)
+    if bin_edges.dim() == 3 and bin_edges.shape == (B, C, bins + 1):
+        edges = bin_edges
+    elif bin_edges.dim() == 2 and bin_edges.shape[1] == bins + 1 and bin_edges.shape[0] == C:
+        edges = bin_edges.unsqueeze(0).expand(B, -1, -1)
+    elif bin_edges.dim() == 1 and bin_edges.numel() == bins + 1:
+        edges = bin_edges.view(1, 1, -1).expand(B, C, -1)
+    else:
+        raise ValueError(f"Unexpected bin_edges shape {bin_edges.shape}")
+
+    edges = edges.to(probs.device, probs.dtype)
+    left, right = edges[..., :-1], edges[..., 1:]
+
+    # Bin centers
+    if log_bins:
+        l = torch.clamp_min(left, eps)
+        r = torch.clamp_min(right, eps)
+        centers = (r - l) / (torch.log(r) - torch.log(l) + eps)
+    else:
+        centers = 0.5 * (left + right)
+
+    if zero_first_bin:
+        centers[..., 0] = 0.0
+
+    # Normalize probabilities and compute expectation
+    probs = probs / (probs.sum(dim=2, keepdim=True) + eps)
+    centers = centers.view(B, C, bins, 1, 1)
+    return (probs * centers).sum(dim=2)
+
+
+def compute_fixed_log_edges_from_scenes(
+    scene_index,              # list of (key, folder) pairs
+    low_spp: int,
+    bins: int,
+    device: str = "cpu",
+    p_lo: float = 0.005, 
+    p_hi: float = 0.995,
+    max_pixels_per_channel: int = 2_000_000,
+    eps: float = 1e-8,
+):
+    """
+    Build global, per-channel, log-spaced histogram edges from robust percentiles.
+
+    Returns:
+        edges: torch.Tensor of shape (3, bins+1), dtype=float32, on `device`.
+    """
+    # Collect a downsampled pool of positive linear radiance values per channel
+    pools = [ [] for _ in range(3) ]  # temporary lists of 1D tensors per channel
+
+    # Light shuffle to avoid scene ordering bias
+    shuffled = list(scene_index)
+    random.shuffle(shuffled)
+
+    for key, folder in shuffled:
+        # Find the "spp1x<low_spp>.tiff"
+        spp1_file = next((f for f in os.listdir(folder)
+                          if f.startswith(key) and f.endswith(f"spp1x{low_spp}.tiff")), None)
+        if spp1_file is None:
+            continue
+
+        path = os.path.join(folder, spp1_file)
+        samples_np = tifffile.imread(path)                     # (N, H, W, 3), linear HDR
+        samples = torch.from_numpy(samples_np).float()         # CPU tensor for quantiles
+        # Flatten samples across N,H,W for each channel
+        for c in range(3):
+            v = samples[..., c].reshape(-1)
+            v = v[v > eps]
+            if v.numel() == 0:
+                continue
+            # Subsample to avoid huge memory — keep at most ~max_pixels_per_channel per scene
+            if v.numel() > max_pixels_per_channel // 4:
+                idx = torch.randint(0, v.numel(), (max_pixels_per_channel // 4,))
+                v = v[idx]
+            pools[c].append(v)
+
+        # Stop early if we already have plenty
+        if all(sum(x.numel() for x in pools[c]) >= max_pixels_per_channel for c in range(3)):
+            break
+
+    # Concatenate per-channel pools and trim to the cap
+    edges = []
+    for c in range(3):
+        if len(pools[c]) == 0:
+            # fallback if a channel ended up empty for some reason
+            lo_lin, hi_lin = torch.tensor(1e-4), torch.tensor(1.0)
+        else:
+            vc = torch.cat(pools[c], dim=0)
+            if vc.numel() > max_pixels_per_channel:
+                idx = torch.randint(0, vc.numel(), (max_pixels_per_channel,))
+                vc = vc[idx]
+
+            # Robust percentiles in LOG space
+            logv = vc.clamp_min(eps).log()
+            lo = torch.quantile(logv, p_lo)
+            hi = torch.quantile(logv, p_hi)
+            if hi <= lo + 1e-6:
+                hi = lo + math.log(1.1)  # widen slightly if degenerate
+
+            # Build log-spaced edges, then exponentiate back to linear
+            # logspace(base=e) with ln edges is equivalent to exp(linspace(lo, hi))
+            e = torch.exp(torch.linspace(lo, hi, steps=bins + 1, dtype=torch.float32))
+            lo_lin, hi_lin = e[0], e[-1]
+
+        edges.append(torch.logspace(lo_lin.log(), hi_lin.log(), steps=bins + 1, base=math.e, dtype=torch.float32))
+
+    edges = torch.stack(edges, dim=0).to(device)  # (3, bins+1)
+    return edges
 
 
 def decode_pred_logits_zero(probs, bin_edges):
@@ -750,6 +905,7 @@ def compute_global_mean_std(root_dir):
 
         img_path = os.path.join(full_subdir, fname)
         img = tifffile.imread(img_path)  # shape: (32, H, W, 3)
+        img = np.ascontiguousarray(img, dtype=np.float32)
         img = torch.from_numpy(img).permute(0, 3, 1, 2).float()  # (32, 3, H, W)
 
         flat = img.permute(0, 2, 3, 1).reshape(-1, 3)  # Flatten to (N*H*W, 3)

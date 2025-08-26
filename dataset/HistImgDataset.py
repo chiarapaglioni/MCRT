@@ -4,17 +4,14 @@ import torch
 import random
 import tifffile
 import numpy as np
-import torch.nn.functional as F
-from torchvision import transforms
+import matplotlib.pyplot as plt
+# Torch
 from torch.utils.data import Dataset
-import os
-import torchvision.transforms.functional as TF
+from torchvision import transforms
 from torchvision.transforms import RandomCrop
-import numpy as np
-import imageio
 # Utils
-from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms, compute_covariance_matrix, chi_square_distance, compute_local_histogram_affinity_chi2
-from dataset.HistogramGenerator import generate_histograms_torch, generate_hist_statistics
+from utils.utils import apply_tonemap, local_variance, sample_crop_coords_from_variance, load_patches, save_patches, load_or_compute_histograms, compute_covariance_matrix, compute_fixed_log_edges_from_scenes
+from dataset.HistogramGenerator import generate_hist_statistics
 
 import logging
 logger = logging.getLogger(__name__)
@@ -123,15 +120,23 @@ class ImageDataset(Dataset):
                         start_time = time.time()
 
                         # random crops because if selected based on variance it overfits!
-                        for _ in range(self.crops_per_scene):
+                        for crop in range(self.crops_per_scene):
                             # i, j, h, w = sample_crop_coords_from_variance(varmap, self.crop_size)
                             i, j, h, w = RandomCrop.get_params(varmap, output_size=(self.crop_size, self.crop_size))
-                            patch_var = varmap[i:i+h, j:j+w].mean().item()
+                            patch_var = varmap[i:i+h, j:j+w]
+                            patch_mean = patch_var.mean().item()
                             scene_patches.append({
                                 "scene": key,
                                 "crop_coords": (i, j, h, w),
-                                "variance": patch_var
+                                "variance": patch_mean
                             })
+
+                            if crop%10 == 0: 
+                                fname = f"{key}_patch_{i}_{j}_varmap.png"
+                                save_path = os.path.join("maps", fname)
+                                
+                                plt.imsave(save_path, patch_var, cmap="viridis")
+                                logger.info(f"Saved patch variance map to {save_path}")
                         elapsed = time.time() - start_time
                         logger.info(f"Finished generating {self.crops_per_scene} crops for scene '{key}' in {elapsed:.2f} seconds!")
 
@@ -244,7 +249,6 @@ class ImageDataset(Dataset):
 
 
 # IMAGE DENOISING - CROP HISTOGRAM DATASET
-# TODO: maybe here instead of an histogram of discrete counts give an actual histogram of the radiance (also faster to generate on GPU)
 class HistogramDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128, mode: str = 'hist',
                  data_augmentation: bool = True, crops_per_scene: int = 1000,
@@ -459,9 +463,10 @@ class HistogramBinomDataset(Dataset):
     def __init__(self, root_dir: str, crop_size: int = 128,
                  data_augmentation: bool = True, virt_size: int = 1000,
                  hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
-                 high_spp: int = 4500, cached_dir: str = None,
+                 high_spp: int = 4500, cached_dir: str = None, aov: bool = False,
                  debug: bool = False, mode: str = None, device: str = None, scene_names=None, 
-                 target_sample: int = 1, stat: bool = True, log_bins = True):
+                 target_sample: int = 1, stat: bool = True, log_bins = True,
+                 minPSNR: float = -40.0, maxPSNR: float = -5.0):
         
         self.root_dir = root_dir
         self.crop_size = crop_size
@@ -470,6 +475,7 @@ class HistogramBinomDataset(Dataset):
         self.hist_bins = hist_bins
         self.clean = clean
         self.stat = stat
+        self.aov = aov
         self.low_spp = low_spp
         self.high_spp = high_spp
         self.cached_dir = cached_dir
@@ -478,6 +484,8 @@ class HistogramBinomDataset(Dataset):
         logger.info(f"Using device Data Loader: {self.device}")
         self.target_sample = target_sample
         self.log_bins = log_bins
+        self.maxPSNR = maxPSNR
+        self.minPSNR = minPSNR
 
         self.clean_images = {}          # clean images for PSNR
         self.scene_paths = {}
@@ -512,13 +520,32 @@ class HistogramBinomDataset(Dataset):
         logger.info(f"Target Histogram Counts: {self.target_sample}")
         logger.info(f"Histogram Bins: {self.hist_bins}")
 
+        self.fixed_edges = compute_fixed_log_edges_from_scenes(
+            scene_index=scene_keys,
+            low_spp=self.low_spp,
+            bins=self.hist_bins,
+            device=self.device if self.device is not None else "cpu",
+            p_lo=0.005, p_hi=0.995,
+            max_pixels_per_channel=2_000_000,
+        )  # (3, bins+1)
+        logger.info(f"Fixed edges ready (per-channel): shape={tuple(self.fixed_edges.shape)}")
+        logger.info(f"Fixed edges ready (per-channel): R - Min: {self.fixed_edges[0].min()}  Max: {self.fixed_edges[0].max()}")
+        logger.info(f"Fixed edges ready (per-channel): G - Min: {self.fixed_edges[1].min()}  Max: {self.fixed_edges[1].max()}")
+        logger.info(f"Fixed edges ready (per-channel): B - Min {self.fixed_edges[2].min()}  Max: {self.fixed_edges[2].max()}")
+
         for key, folder in scene_keys:
             # Load spp1 samples (32 samples, shape: (32, H, W, 3))
             spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
-            assert spp1_file is not None, f"Missing spp1 file for scene {key}"
+            albedo_file = next((f for f in os.listdir(full_subdir) if f.endswith("albedo.tiff")), None)
+            normal_file = next((f for f in os.listdir(full_subdir) if f.endswith("normal.tiff")), None)
+            
             spp1_path = os.path.join(folder, spp1_file)
-            spp1_samples = tifffile.imread(spp1_path)                                                  # (low_spp, H, W, 3)
+            albedo_path = os.path.join(full_subdir, albedo_file)
+            normal_path = os.path.join(full_subdir, normal_file)
+            spp1_samples = tifffile.imread(spp1_path)                                         # (low_spp, H, W, 3)
             spp1_samples = torch.from_numpy(spp1_samples).permute(0, 3, 1, 2).float()         # (N, 3, H, W)
+
+            assert spp1_file is not None, f"Missing spp1 file for scene {key}"
             
             # hist shape: (3, H, W, B)
             # edges shape: (3, H, W, B)
@@ -529,7 +556,8 @@ class HistogramBinomDataset(Dataset):
                 device=self.device,
                 cached_dir=self.cached_dir,
                 log_binning=self.log_bins,
-                normalize=False
+                normalize=False,
+                fixed_edges=self.fixed_edges
             ) 
 
             # generate statistics and tone map them otherwise they'll be in HDR range !!!
@@ -540,15 +568,12 @@ class HistogramBinomDataset(Dataset):
 
             # logger.info(f"Mean Min {pixel_mean.min()} - Max {pixel_mean.max()} - Mean {pixel_mean.mean()} - Var {pixel_mean.var()}")
             # logger.info(f"Var Min {rel_var.min()} - Max {rel_var.max()} - Mean {rel_var.mean()} - Var {rel_var.var()}")
-            # logger.info(f"Cov Min {cov_matrix.min()} - Max {cov_matrix.max()} - Mean {cov_matrix.mean()} - Var {cov_matrix.var()}")
 
             pixel_mean = apply_tonemap(pixel_mean, tonemap="log") 
             rel_var = apply_tonemap(rel_var, tonemap="log") 
-            # cov_matrix = apply_tonemap(cov_matrix, tonemap="log")         do not apply log on cov matrix ! might be negative !
 
             # logger.info(f"Mean Min {pixel_mean.min()} - Max {pixel_mean.max()} - Mean {pixel_mean.mean()} - Var {pixel_mean.var()}")
             # logger.info(f"Var Min {rel_var.min()} - Max {rel_var.max()} - Mean {rel_var.mean()} - Var {rel_var.var()}")
-            # logger.info(f"Cov Min {cov_matrix.min()} - Max {cov_matrix.max()} - Mean {cov_matrix.mean()} - Var {cov_matrix.var()}")
 
             self.cached_data[key] = {
                 "hist": hist, "bin_edges": bin_edges, "mean": pixel_mean, "rel_var": rel_var, "cov_mat": cov_matrix
@@ -562,13 +587,10 @@ class HistogramBinomDataset(Dataset):
             self.scene_paths[key] = {
                 "folder": folder,
                 "spp1_path": spp1_path,
-                "clean_path": clean_path
+                "clean_path": clean_path, 
+                "albedo_path": albedo_path,
+                "normal_path": normal_path
             }
-
-            # Proportion of samples to allocate to target
-            p = self.target_sample / (self.low_spp + 1e-8)
-            self.p = torch.tensor(min(p, 1.0))  # Ensure in [0, 1]
-
 
     def __len__(self):
         return self.virt_size
@@ -579,10 +601,6 @@ class HistogramBinomDataset(Dataset):
         hist = scene_cache['hist']
         bin_edges = scene_cache['bin_edges']
 
-        # CHI2 MATRIX
-        hist_norm = hist / (hist.sum(dim=-1, keepdim=True) + 1e-8)
-        affinity_map = compute_local_histogram_affinity_chi2(hist_norm, scene, cache_dir="maps")  # (1, H, W)
-
         # CROP
         if self.crop_size:
             _, H, W, _ = hist.shape
@@ -590,8 +608,7 @@ class HistogramBinomDataset(Dataset):
                 i, j, h, w = transforms.RandomCrop.get_params(torch.empty((H, W)), output_size=(self.crop_size, self.crop_size))
             else:
                 i, j, h, w = crop_coords
-            hist = hist[:, i:i+h, j:j+w, :]                   # (3, H, W, B)
-            affinity_crop = affinity_map[:, i:i+h, j:j+w]                   # (3, H, W, B)
+            hist = hist[:, i:i+h, j:j+w, :]                                 # (3, H, W, B)
 
         # CLEAN
         clean_tensor = None
@@ -602,39 +619,45 @@ class HistogramBinomDataset(Dataset):
             if self.crop_size:
                 clean_tensor = clean_tensor[:, i:i+h, j:j+w]
 
-        # Randomize target_sample each time (currently discarded because it adds more noise)
-        # target_sample = random.choice([8, 12, , 20, 24])
-        # p = torch.tensor(min(self.target_sample / (self.low_spp + 1e-8), 1.0))              # Compute binomial sampling probability
-        binom = torch.distributions.Binomial(total_count=hist, probs=self.p)                     # Generate binomial input and target histograms
+        # BINOMIAL SPLIT
+        p_min, p_max = 0.12, 0.30
+        u = np.random.uniform(np.log(p_min), np.log(p_max))
+        p_val = float(np.exp(u))
+        p = torch.tensor(p_val, device=hist.device, dtype=torch.float32)
+        binom = torch.distributions.Binomial(total_count=hist.to(torch.float32), probs=p)
         target_hist = binom.sample()
-        input_hist = hist - target_hist
+        input_hist  = hist - target_hist
+
+        # SAVE target counts for loss
+        target_counts_raw = target_hist.clone()
 
         # NORMALISATION
         target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)          # shape (3, H, W, B)
         input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)             # shape (3, H, W, B)
-
         input_tensor = input_hist.permute(0, 3, 1, 2).contiguous().float()                  # shape (3, B, H, W)
         target_tensor = target_hist.permute(0, 3, 1, 2).contiguous().float()                # shape (3, B, H, W)
 
-        # Optionally save affinity map as image (rescale to 0-255)
-        # if self.debug:
-        #     os.makedirs("maps", exist_ok=True)
-        #     affinity_np = (affinity_map.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
-        #     filename = f"{scene}_affinity.png"
-        #     imageio.imwrite(os.path.join("maps", filename), affinity_np)
-
-        # CHI2 MATRIX
-        affinity_expanded = affinity_crop.repeat(3, 1, 1).unsqueeze(1)  # (3, 1, H, W)
-        input_tensor = torch.cat([input_tensor, affinity_expanded], dim=1)
-
         # MEAN and RELATIVE VARIANCE from samples
         if self.stat:
-            pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)             # (3, 1, H, W)
-            pixel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)           # (3, 1, H, W)
-            # cov_tensor = scene_cache['cov_mat'][:, i:i+h, j:j+w]                                # (6, H, W)
-            # cov_tensor = cov_tensor.unsqueeze(0).repeat(3, 1, 1, 1)                             # (3, 6, H, W)
+            pixel_mean_expanded = scene_cache['mean'][:, i:i+h, j:j+w].unsqueeze(1)                     # (3, 1, H, W)
+            pixel_var_expanded = scene_cache['rel_var'][:, i:i+h, j:j+w].unsqueeze(1)                   # (3, 1, H, W)
 
             input_tensor = torch.cat([input_tensor, pixel_mean_expanded, pixel_var_expanded], dim=1)    # (3, B+1+6, H, W)
+
+        # AOV
+        albedo_tensor, normal_tensor = None, None
+        aov_tensors = []
+        if self.aov:
+            if self.scene_paths[scene]["albedo_path"]:
+                albedo_img = tifffile.imread(self.scene_paths[scene]["albedo_path"])
+                albedo_tensor = torch.from_numpy(albedo_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+                albedo_tensor = apply_tonemap(albedo_tensor, tonemap="reinhard")  # (3, H, W)
+                aov_tensors.append(albedo_tensor)
+            if self.scene_paths[scene]["normal_path"]:
+                normal_img = tifffile.imread(self.scene_paths[scene]["normal_path"])
+                normal_tensor = torch.from_numpy(normal_img).permute(2, 0, 1).float()[:, i:i+h, j:j+w]
+                normal_tensor = (normal_tensor + 1.0) * 0.5  # Map from [-1,1] to [0,1]
+                aov_tensors.append(normal_tensor)
 
         # DATA AUGMENTATION
         if self.data_augmentation:
@@ -642,172 +665,23 @@ class HistogramBinomDataset(Dataset):
                 input_tensor = torch.flip(input_tensor, dims=[-1])
                 target_tensor = torch.flip(target_tensor, dims=[-1])
                 clean_tensor = torch.flip(clean_tensor, dims=[-1])
+                aov_tensors = [torch.flip(t, dims=[-1]) for t in aov_tensors]
+                target_counts_raw = torch.flip(target_counts_raw, dims=[2])
             if random.random() > 0.5:
                 input_tensor = torch.flip(input_tensor, dims=[-2])
                 target_tensor = torch.flip(target_tensor, dims=[-2])
                 clean_tensor = torch.flip(clean_tensor, dims=[-2])
+                aov_tensors = [torch.flip(t, dims=[-2]) for t in aov_tensors]
+                target_counts_raw = torch.flip(target_counts_raw, dims=[1])
 
         return {
-            "input_hist": input_tensor,
-            "target_hist": target_tensor,
-            "clean": clean_tensor,
+            "input_hist": input_tensor,                 # (3, B, H, W) normalized
+            "target_hist": target_tensor,               # (3, B, H, W) normalized
+            "target_counts": target_counts_raw,         # (3, B, H, W) raw counts
+            "aov_tensors": aov_tensors,                 # list of normal and albedo (3, H, W) each
+            "clean": clean_tensor,                      # (3, H, W)
             "scene": scene,
-            "bin_edges": bin_edges,
-            "crop_coords": (i, j, h, w) if self.crop_size else None
-        }
-
-
-# GENERATIVE ACCUMULATION - CROP HISTOGRAM BINOM DATASET
-class CropHistogramBinomDataset(Dataset):
-    """"
-        Gives better results as the range is more restricted so more balanced histogram for 128x128 crops and  bins
-        BUT more difficul for model to learn as range chanegs for very crop
-    """
-    def __init__(self, root_dir: str, crop_size: int = 128,
-                 data_augmentation: bool = True, virt_size: int = 1000,
-                 hist_bins: int = 8, clean: bool = True, low_spp: int = 32, 
-                 high_spp: int = 4500, cached_dir: str = None,
-                 debug: bool = False, mode: str = None, device: str = None, scene_names=None, 
-                 target_sample: int = 1, stat: bool = True):
-        self.root_dir = root_dir
-        self.crop_size = crop_size
-        self.data_augmentation = data_augmentation
-        self.virt_size = virt_size
-        self.hist_bins = hist_bins
-        self.clean = clean
-        self.stat = stat
-        self.low_spp = low_spp
-        self.high_spp = high_spp
-        self.cached_dir = cached_dir
-        self.debug = debug
-        self.device = device
-        logger.info(f"Using device Data Loader: {self.device}")
-        self.target_sample = target_sample
-
-        self.hist_features = {}      # input histograms (from spp1 samples)
-        self.clean_images = {}       # clean images for PSNR
-        self.bin_edges = {}
-        self.scene_paths = {}
-        self.spp1_samples = {}
-        self.global_bin_counts = torch.zeros(self.hist_bins)
-
-        if self.cached_dir and not os.path.exists(self.cached_dir):
-            os.makedirs(self.cached_dir)
-
-        # Find all scenes and spp1 files
-        scene_keys = []
-        for subdir in sorted(os.listdir(self.root_dir)):
-            full_subdir = os.path.join(self.root_dir, subdir)
-            if not os.path.isdir(full_subdir):
-                continue
-            for fname in os.listdir(full_subdir):
-                if fname.endswith(f"spp1x{self.low_spp}.tiff"):
-                    key = fname.split(f"_spp")[0]
-                    scene_keys.append((key, full_subdir))
-
-        all_scenes = sorted(set(key for key, _ in scene_keys))
-
-        if scene_names is not None:
-            scene_names_set = set(scene_names)
-            scene_keys = [(key, folder) for key, folder in scene_keys if key in scene_names_set]
-            self.scene_names = sorted(scene_names_set.intersection(all_scenes))
-        else:
-            self.scene_names = all_scenes
-
-        assert self.scene_names, f"No scenes found in {self.root_dir}"
-        logger.info(f"{len(self.scene_names)} scenes: {self.scene_names}")
-        logger.info(f"Input Histogram Counts: {self.low_spp - self.target_sample}")
-        logger.info(f"Target Histogram Counts: {self.target_sample}")
-        logger.info(f"Histogram Bins: {self.hist_bins}")
-
-        for key, folder in scene_keys:
-            # Load spp1 samples (32 samples, shape: (32, H, W, 3))
-            spp1_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp1x{self.low_spp}.tiff")), None)
-            assert spp1_file is not None, f"Missing spp1 file for scene {key}"
-            spp1_path = os.path.join(folder, spp1_file)
-            spp1_samples = tifffile.imread(spp1_path)  # shape: (32, H, W, 3)
-            self.spp1_samples[key] = torch.from_numpy(spp1_samples)
-
-            # Load clean image for target
-            clean_file = next((f for f in os.listdir(folder) if f.startswith(key) and f.endswith(f"spp{self.high_spp}.tiff")), None)
-            assert clean_file is not None, f"Missing clean file for scene {key}"
-            clean_path = os.path.join(folder, clean_file)
-            clean_img = tifffile.imread(clean_path)  # shape: (H, W, 3)
-            self.clean_images[key] = torch.from_numpy(clean_img).permute(2, 0, 1).float()
-
-            self.scene_paths[key] = folder
-
-            # Split spp1 samples into input and target sets
-            assert spp1_samples.shape[0] > self.target_sample, f"target_sample={self.target_sample} must be < total spp1 samples={spp1_samples.shape[0]}"
-
-    def __len__(self):
-        return self.virt_size
-
-    def __getitem__(self, idx, crop_coords=None):
-        scene = self.scene_names[idx % len(self.scene_names)]
-        clean_tensor = self.clean_images[scene]                 # (3, H, W)
-        spp1_samples = self.spp1_samples[scene]                 # (low_spp, H, W, 3)
-
-        # CROP
-        if self.crop_size:
-            _, H, W, _ = spp1_samples.shape
-            if crop_coords is None:
-                i, j, h, w = transforms.RandomCrop.get_params(torch.empty((H, W)), output_size=(self.crop_size, self.crop_size))
-            else:
-                i, j, h, w = crop_coords
-            spp1_samples = spp1_samples[:, i:i+h, j:j+w, :]    # (low_spp, crop_H, crop_W, 3)
-            clean_tensor = clean_tensor[:, i:i+h, j:j+w]
-
-        # ACCUMULATE HISTOGRAM HERE PER CROP !!!! 
-        hist, bin_edges_tensor = generate_histograms_torch(spp1_samples, self.hist_bins, self.device, log_binning=True)
-
-        # BINOMIAL SPLIT
-        # target_sample = random.choice([4, 8, 12, , 20])                     
-        # discarded because even if it augments it confuses the model (uncomment if confidence is added)
-        p = torch.tensor(min(self.target_sample / (self.low_spp + 1e-8), 1.0))       # Binom Probability 
-        binom = torch.distributions.Binomial(total_count=hist, probs=p)         # Binom Sampling
-        target_hist = binom.sample()
-        input_hist = hist - target_hist
-
-        # CONFIDENCE: number of samples = "how much to trust the network" (DISCARDED because not using random target samples)
-        confidence = input_hist.sum(dim=-1)  # shape: (H, W, 3)
-
-        # NORMALIZATION
-        target_hist = target_hist / (target_hist.sum(dim=-1, keepdim=True) + 1e-8)
-        input_hist = input_hist / (input_hist.sum(dim=-1, keepdim=True) + 1e-8)
-        input_tensor = input_hist.permute(2, 3, 0, 1).contiguous().float()      # (3, B, H, W)
-        target_tensor = target_hist.permute(2, 3, 0, 1).contiguous().float()    # (3, B, H, W)
-
-        # Add confidence as an extra channel per RGB component
-        # confidence = confidence.permute(2, 0, 1).unsqueeze(1)                    # (3, 1, H, W)
-        # input_tensor = torch.cat([input_tensor, confidence], dim=1)              # (3, B+1, H, W) --> across bins may ruin model predictions because it sees confidence as extra counts
-
-        # MEAN
-        # Compute mean image from input samples (excluding target_sample)
-        if self.stat:
-            input_sample_count = self.low_spp - self.target_sample
-            input_samples = spp1_samples[:input_sample_count]  # (N, H, W, 3)
-            mean_img = input_samples.mean(dim=0).permute(2, 0, 1).float()  # (3, H, W)
-            mean_img = mean_img.unsqueeze(1)  # (3, 1, H, W)
-            input_tensor = torch.cat([input_tensor, mean_img], dim=1)  # (3, B+1, H, W)
-
-        # DATA AUMENTATION
-        if self.data_augmentation:
-            if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[-1])
-                target_tensor = torch.flip(target_tensor, dims=[-1])
-                clean_tensor = torch.flip(clean_tensor, dims=[-1])
-            if random.random() > 0.5:
-                input_tensor = torch.flip(input_tensor, dims=[-2])
-                target_tensor = torch.flip(target_tensor, dims=[-2])
-                clean_tensor = torch.flip(clean_tensor, dims=[-2])
-
-        return {
-            "input_hist": input_tensor,
-            "target_hist": target_tensor,
-            "clean": clean_tensor,
-            "scene": scene,
-            "bin_edges": bin_edges_tensor,
+            "bin_edges": self.fixed_edges,
             "crop_coords": (i, j, h, w) if self.crop_size else None
         }
 

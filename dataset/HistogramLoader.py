@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 # Datasets
-from dataset.HistImgDataset import HistogramDataset, CropHistogramBinomDataset
+from dataset.HistImgDataset import HistogramDataset, HistogramBinomDataset
 
 # Logger
 import logging
@@ -58,11 +58,11 @@ def test_data_loader(config):
 
     # Pick dataset
     if out_mode == "dist":
-        dataset = CropHistogramBinomDataset(**dataset_cfg)
+        dataset = HistogramBinomDataset(**dataset_cfg)
         input_key = 'input_hist'
         target_key = 'target_hist'
     elif out_mode == "mean":
-        dataset = CropHistogramDataset(**dataset_cfg)
+        dataset = HistogramDataset(**dataset_cfg)
         input_key = 'input'
         target_key = 'target'
     else:

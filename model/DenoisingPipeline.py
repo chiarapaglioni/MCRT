@@ -74,11 +74,7 @@ class SMAPELoss(nn.Module):
         """
         numerator = torch.abs(prediction - target)
         denominator = torch.abs(prediction) + torch.abs(target) + self.epsilon
-        
-        # Calculate per-pixel, per-channel SMAPE
         smape_map = numerator / denominator
-        
-        # Average over pixels, channels, and batch
         return smape_map.mean()
 
 
@@ -119,12 +115,13 @@ def get_data_loaders(config, run_mode="train"):
 
     train_sampler = WeightedRandomSampler(train_weights, len(train_weights), replacement=True)
     val_sampler = WeightedRandomSampler(val_weights, len(val_weights), replacement=True)
-
+    
+    # NOTE: sampling option is mutually exclusive with shuffling
     train_loader = DataLoader(
         train_ds,
         batch_size=config['batch_size'],
-        shuffle=True,
-        # sampler=train_sampler,
+        # shuffle=True,
+        sampler=train_sampler,
         num_workers=config['num_workers'],
         pin_memory=config['pin_memory'],
         drop_last=True,
@@ -132,8 +129,8 @@ def get_data_loaders(config, run_mode="train"):
     val_loader = DataLoader(
         val_ds,
         batch_size=config['batch_size'],
-        shuffle=False,
-        # sampler=val_sampler,
+        # shuffle=False,
+        sampler=val_sampler,
         num_workers=config['num_workers'],
         pin_memory=config['pin_memory'],
         drop_last=False,

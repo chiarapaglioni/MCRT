@@ -1,7 +1,6 @@
 name: mcrt
 channels:
   - pytorch
-  - conda-forge
 dependencies:
   - python=3.9
   - numpy=1.22.3
@@ -11,7 +10,6 @@ dependencies:
   - tifffile=2022.5.4
   - libtiff=4.3.0
   - pip=22.1.2
-  - cudatoolkit=11.6
   - pytorch
   - torchvision=0.13.0
   - torchsummary

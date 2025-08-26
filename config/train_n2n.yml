@@ -2,7 +2,7 @@ dataset:
   root_dir: output                        # Raw dataset location
   cached_dir: crops                       # Cached histograms are saved
   crop_size: 128
-  crops_per_scene: 300                    # num of crops per scene to generate
+  crops_per_scene: 100                    # num of crops per scene to generate
   use_cached_crops: true
   low_spp: 64
   high_spp: 4500
@@ -29,7 +29,7 @@ model:
 
 # DATALOADER
 batch_size: 16                          # minibatch: 8, 12, or 16
-num_workers: 10                         # 4 on CPU or 8 on GPU
+num_workers: 4                          # 4 on CPU or 8 on GPU
 shuffle: true
 pin_memory: false
 standardisation: global                  # if 'global' print dataset mean and std
@@ -38,6 +38,6 @@ loss: smape                              # 'mse' or 'l1' or 'rmse' or 'lhdr' or 
 val_split: 0.1                           # 10% validation split
 
 # TRAINING
-num_epochs: 300
-plot_every: 5                            # how often to save the debug plots
+num_epochs: 100
+plot_every: 4                            # how often to save the debug plots
 save_dir: checkpoints

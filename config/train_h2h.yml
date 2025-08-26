@@ -11,12 +11,15 @@ dataset:
   clean: true                           # whether to include 'clean' targets if available
   debug: true                           # saves plot to output save_dir for debugging
   stat: false                           # wether to include mean and var value alongside histogram (helps with colour reconstruction)
-  target_sample: 32                     # number of samples assigned to target (out of low_spp samples)                            
-  log_bins: false                       # whether to use histogram with log or linear binning
+  aov: true                             # whether to include 'aov' channels to input image
+  target_sample: 48                     # number of samples assigned to target (out of low_spp samples)                            
+  log_bins: true                        # whether to use histogram with log or linear binning
+  minPSNR: -40
+  maxPSNR: -5
 
 model:
   model_name: gap
-  in_channels: 3                        # 3 by default
+  in_channels: 102                      # 102 when aov = true
   n_bins_input: 32                      # hist_bins if only using hist, else 18 if using other stats
   out_mode: dist                        # 'mean' or 'dist' to output RGB image or distrbution
   merge_mode: concat                    # 'add' or 'concat'
@@ -25,12 +28,12 @@ model:
   learning_rate: 1e-4
 
 # DATALOADER
-batch_size: 16
+batch_size: 32
 num_workers: 4
 shuffle: true
 pin_memory: false
 crop: false                             # whether to compute bin edges per crop or per image  
-loss: ce                                # 'ce' or 'kl' OR 'wass'
+loss: multinomial                       # 'ce' or 'kl' OR 'wass' OR 'hybrid' OR 'multinomial'
 
 val_split: 0.1                          # 10% validation split
 

@@ -28,35 +28,34 @@ def main():
     config_path = Path(args.config) if args.config else Path(f"config/{task}.yml")
     config = load_config(config_path)
 
-    # RENDERING DATA GENERATION (OK) <3
+    # RENDERING DATA GENERATION (OK) 
     if task == "data_gen":
         generate_data(config)
 
-    # DATA LOADER (OK) <3
+    # DATA LOADER (OK) 
     elif task == "data_loader":
         test_data_loader(config)
 
-    # TRAIN (OK) <3
+    # TRAIN (OK) 
     elif task == "train":
         train_model(config)
     
-    # EVAL (OK) <3
+    # EVAL (OK) 
     elif task == "eval":
-        # evaluate_model(config)
-        evaluate_model_aov(config)
+        evaluate_model(config)
 
-    # GEN-TRAIN (OK) <3
+    # GEN-TRAIN (OK) 
     elif task == "train_gen":
         train_histogram_generator(config)                       # Train x dist
         # train_histogram_residual(config)                      # Train x residual
     
-    # GEN-EVAL (OK) <3
+    # GEN-EVAL (OK) 
     elif task == "eval_gen":
         # iterative_evaluate(config)
-        run_generative_accumulation_pipeline(config)            # GAP
-        # test_histogram_generator(config)                      # noisy vs. pred
+        # run_generative_accumulation_pipeline(config)            # GAP
+        test_histogram_generator(config)                      # noisy vs. pred
 
-    # GPU TEST (OK) <3
+    # GPU TEST (OK) 
     elif task == "test_workers":
         benchmark_num_workers(config)
 
