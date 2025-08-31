@@ -61,7 +61,7 @@ class N2Net(nn.Module):
 
         logger.info(f"Out Mode: {out_mode.upper()} - Output Channels:{last_decoder_out_channels}")
 
-        # ---- ENCODER ----
+        # ENCODER
         self.enc_conv01 = nn.Sequential(
             ConvBlockLeakyRelu(first_encoder_input_channels, bw, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(bw, bw, 3, stride=1, padding=1),
@@ -89,7 +89,7 @@ class N2Net(nn.Module):
             ConvBlockLeakyRelu(bw, bw, 3, stride=1, padding=1)
         )
 
-        # ---- DECODER ----
+        # DECODER
         self.dec_conv5ab = nn.Sequential(
             ConvBlockLeakyRelu(bw * 2, bw2, 3, stride=1, padding=1),
             ConvBlockLeakyRelu(bw2, bw2, 3, stride=1, padding=1)
@@ -132,7 +132,7 @@ class N2Net(nn.Module):
         # logger.info(f"Input Shape: {x.shape}")
         residual_connection = [x]
 
-        # ---- ENCODER ----
+        # ENCODER
         x = self.enc_conv01(x)
         # TODO: currently removed learnable hist features as they were not helping
         # if self.mode == "hist":
@@ -152,7 +152,7 @@ class N2Net(nn.Module):
 
         x = self.enc_conv56(x)
 
-        # ---- DECODER ----
+        # DECODER
         x = F.interpolate(x, scale_factor=2, mode="nearest")
         x = torch.cat([x, residual_connection.pop()], dim=1)
         x = self.dec_conv5ab(x)
@@ -176,6 +176,9 @@ class N2Net(nn.Module):
         if self.out_mode == 'dist':
             x = x.view(B, 3, self.hist_bins, H, W)
         # logger.info(f"Output Shape: {x.shape}")
+
+        # TODO: reversing log tonemapping here to help the model?
+        # Otherwise network needs to learn it on its own
         return x
 
     def _initialize_weights(self):

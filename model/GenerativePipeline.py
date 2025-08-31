@@ -114,15 +114,6 @@ class HybridLoss(nn.Module):
         l = self.image_loss(pred_values, target_values)
         return self.alpha * ce + self.beta * l
 
-# MULTINOMIAL LOSS 
-class MultinomialNLL(nn.Module):
-    def forward(self, pred_logits, target_counts):
-        # pred_logits: (N, n_bins), unnormalized
-        # target_counts: (N, n_bins), non-negative (float ok)
-        log_probs = F.log_softmax(pred_logits, dim=1)
-        return -(target_counts * log_probs).sum(dim=1).mean()
-
-
 
 # DATA LOADERS
 def get_generative_dataloaders(config, device):
@@ -225,10 +216,10 @@ def train_generative_epoch(model, loss_fn, dataloader, optimizer, device, n_bins
 
         # Flatten to (N, n_bins) where N = B*C*H*W
         pred_logits_flat = pred_logits.view(-1, n_bins)                     # (B*C*H*W, n_bins)
-        target_hist_flat = target_hist.view(-1, n_bins)                     # (B*C*H*W, n_bins)
-        target_counts_flat = target_counts.view(-1, n_bins)                 # (B*C*H*W, n_bins)
+        target_hist_flat = target_hist.view(-1, n_bins)                     # (B*C*H*W, n_bins) (normalised)
+        target_counts_flat = target_counts.view(-1, n_bins)                 # (B*C*H*W, n_bins) (raw counts)
 
-        loss = loss_fn(pred_logits_flat, target_counts_flat)                # standard loss: hist only
+        loss = loss_fn(pred_logits_flat, target_hist_flat)                # standard loss: hist only
         # loss = loss_fn(pred_logits_flat, target_hist_flat, apply_tonemap(pred_rgb_img, "log"), apply_tonemap(target_rgb_img, "log"))    # hybrid loss: hist loss + image loss
 
         loss.backward()
@@ -285,11 +276,11 @@ def validate_generative_epoch(model, loss_fn, dataloader, device, n_bins, epoch,
 
             # Flatten to (N, n_bins) where N = B*C*H*W
             pred_logits_flat = pred_logits.view(-1, n_bins)                         # (B*C*H*W, n_bins)
-            target_hist_flat = target_hist.view(-1, n_bins)                         # (B*C*H*W, n_bins)
-            target_counts_flat = target_counts.view(-1, n_bins)                     # (B*C*H*W, n_bins)
+            target_hist_flat = target_hist.view(-1, n_bins)                         # (B*C*H*W, n_bins) (normalised)
+            target_counts_flat = target_counts.view(-1, n_bins)                     # (B*C*H*W, n_bins) (raw counts)
             
             # TODO: make it auomatic to switch between these two when using normal or hybrid loss
-            loss = loss_fn(pred_logits_flat, target_counts_flat)                    # standard loss: hist only
+            loss = loss_fn(pred_logits_flat, target_hist_flat)                    # standard loss: hist only
             # loss = loss_fn(pred_logits_flat, target_hist_flat, apply_tonemap(pred_rgb_img, "log"), apply_tonemap(target_rgb_img, "log"))    # hybrid loss: hist loss + image loss
             total_loss += loss.item()
 
@@ -358,8 +349,6 @@ def train_histogram_generator(config):
         loss_fn = WassersteinLoss()
     elif config['loss']=='hybrid':
         loss_fn = HybridLoss(alpha=1.0, beta=0.2)
-    elif config['loss']=='multinomial':
-        loss_fn = MultinomialNLL()
 
     logger.info(f"Using loss {config['loss'].upper()}")
 

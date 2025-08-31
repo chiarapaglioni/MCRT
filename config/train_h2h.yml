@@ -2,7 +2,7 @@ dataset:
   root_dir: output                      # Raw dataset location
   cached_dir: histograms                # Cached histograms are saved
   crop_size: 128
-  low_spp: 64
+  low_spp: 128
   high_spp: 4500
   hist_bins: 32
   mode: hist                            # Options: 'hist' for hist2hist
@@ -12,10 +12,9 @@ dataset:
   debug: true                           # saves plot to output save_dir for debugging
   stat: false                           # wether to include mean and var value alongside histogram (helps with colour reconstruction)
   aov: true                             # whether to include 'aov' channels to input image
-  target_sample: 48                     # number of samples assigned to target (out of low_spp samples)                            
+  target_sample: 64                     # number of samples assigned to target (out of low_spp samples)                            
   log_bins: true                        # whether to use histogram with log or linear binning
-  minPSNR: -40
-  maxPSNR: -5
+  p_val: 0.5                            # probability used in binomial splitting to generate input/target histograms
 
 model:
   model_name: gap
@@ -33,7 +32,7 @@ num_workers: 4
 shuffle: true
 pin_memory: false
 crop: false                             # whether to compute bin edges per crop or per image  
-loss: multinomial                       # 'ce' or 'kl' OR 'wass' OR 'hybrid' OR 'multinomial'
+loss: ce                                # 'ce' or 'kl' OR 'wass' OR 'hybrid'
 
 val_split: 0.1                          # 10% validation split
 
